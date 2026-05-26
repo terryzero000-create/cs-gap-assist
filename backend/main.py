@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api import config, paper
+from backend.api import citation, config, paper
 from backend.core.config import get_settings
 from backend.core.errors import register_error_handlers
 
@@ -16,6 +16,7 @@ app.add_middleware(
 )
 register_error_handlers(app)
 app.include_router(config.router, prefix=settings.api_prefix)
+app.include_router(citation.router, prefix=settings.api_prefix)
 app.include_router(paper.router, prefix=settings.api_prefix)
 
 

@@ -18,40 +18,40 @@ class MockChatProvider(ChatProvider):
     """Deterministic chat provider for local development and tests."""
 
     async def generate(self, prompt: str, model: str | None = None) -> tuple[str, list[str]]:
-        """Generate a deterministic Chinese response for the supplied prompt."""
+        """Generate deterministic text or structured JSON for the supplied prompt."""
         if "GAP_JSON" in prompt:
             payload = {
                 "gaps": [
                     {
-                        "title": "跨数据集泛化验证不足",
+                        "title": "Cross-dataset generalization is under-evaluated",
                         "value_level": "high",
-                        "description": "现有工作往往只在单一数据集上验证，缺少跨领域迁移和长期鲁棒性证据。",
+                        "description": "Existing work often reports results on one benchmark and lacks cross-domain robustness evidence.",
                         "evidence_papers": ["mock-paper-1", "mock-paper-2"],
                     },
                     {
-                        "title": "消融实验覆盖不完整",
+                        "title": "Ablation coverage is incomplete",
                         "value_level": "mid",
-                        "description": "关键模块的独立贡献尚未通过系统消融和误差分析充分解释。",
+                        "description": "Key module contributions need stronger ablation and error analysis.",
                         "evidence_papers": ["mock-paper-2"],
                     },
                 ]
             }
-            return json.dumps(payload, ensure_ascii=False), ["Chat provider fell back to mock generation."]
+            return json.dumps(payload), ["Chat provider fell back to mock generation."]
         if "EXPERIMENT_JSON" in prompt:
             payload = {
                 "experiments": [
                     {
-                        "objective": "验证方法在跨领域场景下的泛化能力。",
-                        "datasets": ["PapersWithCode公开数据集", "arXiv领域子集"],
+                        "objective": "Evaluate method robustness under cross-domain conditions.",
+                        "datasets": ["PapersWithCode public benchmark", "arXiv domain subset"],
                         "metrics": ["Accuracy", "F1", "NDCG"],
-                        "baselines": ["BM25", "标准RAG", "无重排序版本"],
-                        "steps": ["构建领域划分", "训练或配置基线", "执行跨领域评估", "进行误差分析"],
-                        "risks": ["数据集规模不足", "外部API返回不稳定"],
+                        "baselines": ["BM25", "standard RAG", "RAG without reranking"],
+                        "steps": ["Build domain splits", "Configure baselines", "Run cross-domain evaluation", "Perform error analysis"],
+                        "risks": ["Dataset size may be small", "External APIs may be unstable"],
                     }
                 ]
             }
-            return json.dumps(payload, ensure_ascii=False), ["Chat provider fell back to mock generation."]
-        return "基于已检索段落，当前论文的核心贡献和局限已在来源中标注。", ["Chat provider fell back to mock generation."]
+            return json.dumps(payload), ["Chat provider fell back to mock generation."]
+        return "Mock answer grounded in retrieved source paragraphs.", ["Chat provider fell back to mock generation."]
 
 
 class DeepSeekChatProvider(ChatProvider):

@@ -1,4 +1,4 @@
-import type { GapAnalysisResponse, ModelConfig, PaperUploadResponse } from '../types';
+import type { GapAnalysisResponse, ModelConfig, PaperUploadResponse, ReadingQAResponse } from '../types';
 
 const API_PREFIX = '/api/v1';
 
@@ -23,6 +23,16 @@ export async function analyzeGaps(topic: string, docIds: string[], modelConfig?:
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ topic, doc_ids: docIds, model_config: modelConfig }),
+    }),
+  );
+}
+
+export async function askPaper(question: string, docIds: string[], modelConfig?: ModelConfig): Promise<ReadingQAResponse> {
+  return parseResponse<ReadingQAResponse>(
+    await fetch(`${API_PREFIX}/reading/qa`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, doc_ids: docIds, top_k: 5, model_config: modelConfig }),
     }),
   );
 }

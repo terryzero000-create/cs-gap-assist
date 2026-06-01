@@ -25,8 +25,20 @@ async def answer_question(request: ReadingQARequest, settings: Settings) -> Read
         )
         for chunk in chunks
     ]
-    context = "\n\n".join(f"[{source.chunk_id} p.{source.page}] {source.text}" for source in sources)
-    prompt = f"请基于以下论文段落回答问题，并保持中文简洁。\n问题：{request.question}\n段落：\n{context}"
+    if not sources:
+        return ReadingQAResponse(answer="证据不足：未在已上传论文中检索到可用于回答该问题的段落。", sources=[], warnings=embedding_warnings)
+
+    context = "\n\n".join(
+        f"[{index}] page {source.page}, chunk {source.chunk_id}: {source.text}"
+        for index, source in enumerate(sources, start=1)
+    )
+    prompt = (
+        "READING_QA\n"
+        "请只基于给定论文段落回答问题。答案使用简洁中文，并在每个关键结论后标注来源编号，"
+        "例如 [1] 或 [1][2]。如果段落不足以回答，请直接说明证据不足。\n\n"
+        f"问题：{request.question}\n\n"
+        f"来源段落：\n{context}"
+    )
     chat_provider = get_chat_provider(settings, selected.chat_provider if selected else None)
     answer, chat_warnings = await chat_provider.generate(prompt, selected.chat_model if selected else None)
     return ReadingQAResponse(answer=answer, sources=sources, warnings=[*embedding_warnings, *chat_warnings])

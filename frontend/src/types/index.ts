@@ -44,3 +44,11 @@ export interface ReadingQAResponse {
   sources: SourceParagraph[];
   warnings: string[];
 }
+
+export interface ReadingQAHistoryItem {
+  id: string;
+  question: string;
+  paperTitles: string[];
+  createdAt: string;
+  result: ReadingQAResponse;
+}

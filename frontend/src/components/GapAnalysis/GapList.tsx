@@ -6,16 +6,26 @@ interface GapListProps {
 
 export function GapList({ gaps }: GapListProps) {
   if (gaps.length === 0) {
-    return <p>输入研究方向并选择论文后，这里会展示高/中价值Research Gap。</p>;
+    return <p className="empty-state">Gap results will appear here after analysis.</p>;
   }
   return (
-    <section>
-      <h2>Research Gap 分析</h2>
+    <section className="gap-list">
+      <h2>Research Gaps</h2>
       {gaps.map((gap) => (
-        <article key={gap.gap_id}>
-          <strong>{gap.value_level === 'high' ? '高价值' : '中价值'}</strong>
-          <h3>{gap.title}</h3>
+        <article className="gap-item" key={gap.gap_id}>
+          <div className="gap-item-header">
+            <strong>{gap.title}</strong>
+            <span className={`value-badge value-badge-${gap.value_level}`}>{gap.value_level}</span>
+          </div>
           <p>{gap.description}</p>
+          <div className="evidence-block">
+            <span>Evidence</span>
+            <ul>
+              {gap.evidence_papers.map((paper) => (
+                <li key={paper}>{paper}</li>
+              ))}
+            </ul>
+          </div>
         </article>
       ))}
     </section>

@@ -1,20 +1,56 @@
-import { ChangeEvent, FormEvent, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 
 import { askPaper, uploadPaper } from './api/client';
 import { ReadingQA } from './components/PaperUpload/ReadingQA';
 import './style.css';
 import type { PaperUploadResponse, ReadingQAHistoryItem, ReadingQAResponse } from './types';
 
+const historyStorageKey = 'cs-gap-assist-reading-qa-history';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isReadingQAHistoryItem(value: unknown): value is ReadingQAHistoryItem {
+  if (!isRecord(value) || !isRecord(value.result)) {
+    return false;
+  }
+  return (
+    typeof value.id === 'string'
+    && typeof value.question === 'string'
+    && Array.isArray(value.paperTitles)
+    && value.paperTitles.every((title) => typeof title === 'string')
+    && typeof value.createdAt === 'string'
+    && typeof value.result.answer === 'string'
+    && Array.isArray(value.result.sources)
+    && Array.isArray(value.result.warnings)
+  );
+}
+
+function loadReadingQAHistory(): ReadingQAHistoryItem[] {
+  try {
+    const rawHistory = window.localStorage.getItem(historyStorageKey);
+    const parsed: unknown = rawHistory ? JSON.parse(rawHistory) : [];
+    return Array.isArray(parsed) ? parsed.filter(isReadingQAHistoryItem).slice(0, 8) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function App() {
   const [papers, setPapers] = useState<PaperUploadResponse[]>([]);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState<ReadingQAResponse | null>(null);
-  const [history, setHistory] = useState<ReadingQAHistoryItem[]>([]);
+  const [history, setHistory] = useState<ReadingQAHistoryItem[]>(loadReadingQAHistory);
   const [isUploading, setIsUploading] = useState(false);
   const [isAsking, setIsAsking] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [qaError, setQaError] = useState<string | null>(null);
+
+  useEffect(() => {
+    window.localStorage.setItem(historyStorageKey, JSON.stringify(history));
+  }, [history]);
 
   async function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
@@ -93,6 +129,10 @@ export function App() {
     setQaError(null);
   }
 
+  function clearHistory() {
+    setHistory([]);
+  }
+
   return (
     <main className="shell">
       <header className="app-header">
@@ -152,6 +192,7 @@ export function App() {
           history={history}
           isAsking={isAsking}
           onAsk={handleAsk}
+          onClearHistory={clearHistory}
           onRestoreHistory={restoreHistoryItem}
           paperCount={papers.length}
           question={question}

@@ -68,26 +68,32 @@ Implemented:
 - Question over uploaded `doc_ids`.
 - Retrieves source chunks.
 - Returns answer plus `sources` with `doc_id`, `chunk_id`, `page`, `text`, and `score`.
-- Basic frontend component: `frontend/src/components/PaperUpload/ReadingQA.tsx`.
+- Frontend upload/question workflow.
+- Multi-paper selection and session-level paper removal.
+- Numbered source citations in answers, with frontend citation jump behavior.
+- Page/source paragraph display with score.
+- Session question history with local persistence.
+- Common follow-up question templates.
+- Copy answer and export Markdown actions.
+- Request validation for blank questions, missing `doc_ids`, and invalid `top_k`.
 
 Known limitations:
 
-- Depends on branch-local version of foundation before `ffa00fe`; merge latest `codex/foundation` before continuing.
 - Answer generation uses provider fallback unless real DeepSeek key is configured.
-- Source highlighting in the PDF UI is not implemented.
+- Retrieval/answer quality needs real `DEEPSEEK_API_KEY` and `OPENAI_API_KEY` integration testing.
+- Full PDF viewer source highlighting is not implemented; source paragraphs and page numbers are displayed instead.
 
 Next steps:
 
-- Merge latest `codex/foundation`.
-- Add frontend upload/question workflow.
-- Add page/paragraph source display and citation jump behavior.
-- Improve retrieval prompts and answer format.
+- Integrate a PDF viewer if exact in-document paragraph highlighting becomes required.
+- Run quality tests with real DeepSeek/OpenAI keys when available.
 
 Verification on branch:
 
 ```powershell
-python -m pytest backend/tests/test_foundation.py backend/tests/test_reading_qa.py -q
+python -m pytest backend/tests -q
 npm test --prefix frontend
+npm run build --prefix frontend
 ```
 
 ## codex/research-gap

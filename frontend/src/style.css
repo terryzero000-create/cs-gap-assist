@@ -291,6 +291,12 @@ textarea:focus {
   gap: 8px;
 }
 
+.history-heading-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
 .action-message {
   background: #ecfdf5;
   border-radius: 8px;

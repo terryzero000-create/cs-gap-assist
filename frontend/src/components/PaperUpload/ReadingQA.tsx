@@ -8,6 +8,7 @@ interface ReadingQAProps {
   history: ReadingQAHistoryItem[];
   isAsking: boolean;
   onAsk: (event: FormEvent<HTMLFormElement>) => void;
+  onClearHistory: () => void;
   onRestoreHistory: (item: ReadingQAHistoryItem) => void;
   paperCount: number;
   question: string;
@@ -59,6 +60,7 @@ export function ReadingQA({
   history,
   isAsking,
   onAsk,
+  onClearHistory,
   onRestoreHistory,
   paperCount,
   question,
@@ -164,7 +166,12 @@ export function ReadingQA({
       <section className="history-panel">
         <div className="section-heading">
           <h2>问答历史</h2>
-          <span>{history.length} 条</span>
+          <div className="history-heading-actions">
+            <span>{history.length} 条</span>
+            {history.length > 0 ? (
+              <button className="secondary-button" onClick={onClearHistory} type="button">清空</button>
+            ) : null}
+          </div>
         </div>
         {history.length > 0 ? (
           <ol className="history-list">

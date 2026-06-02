@@ -220,6 +220,53 @@ def test_experiment_suggestion_skips_semantic_scholar_by_default(monkeypatch, tm
     assert response.json()["experiments"][0]["support_papers"][0] == "arxiv-1"
 
 
+def test_experiment_suggestion_does_not_pass_semantic_scholar_credentials(monkeypatch, tmp_path) -> None:
+    captured_kwargs: list[dict[str, object]] = []
+
+    class CapturingSemanticScholarClient:
+        def __init__(self, **kwargs: object) -> None:
+            captured_kwargs.append(kwargs)
+
+        async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
+            return [
+                ExternalPaper(
+                    paper_id=f"semantic-{index}",
+                    title=f"Semantic support {index}",
+                    abstract="Evidence for experiment design.",
+                    year=2025,
+                )
+                for index in range(1, limit + 1)
+            ], []
+
+    class StubArxivSearchClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
+            return [
+                ExternalPaper(
+                    paper_id=f"arxiv-{index}",
+                    title=f"Arxiv support {index}",
+                    abstract="Evidence for experiment design.",
+                    year=2025,
+                )
+                for index in range(1, limit + 1)
+            ], []
+
+    monkeypatch.setattr(experiment_chain, "SemanticScholarClient", CapturingSemanticScholarClient)
+    monkeypatch.setattr(experiment_chain, "ArxivSearchClient", StubArxivSearchClient)
+
+    response = asyncio.run(
+        experiment_chain.suggest_experiments(
+            ExperimentSuggestRequest(gap_id="gap-semantic", topic="rag experiments"),
+            Settings(enable_semantic_scholar=True, sqlite_url=f"sqlite:///{tmp_path / 'experiment.db'}"),
+        )
+    )
+
+    assert response.experiments[0].support_papers[0] == "semantic-1"
+    assert captured_kwargs == [{"timeout_seconds": 3.0}]
+
+
 def test_experiment_suggestion_repairs_fenced_json(monkeypatch, tmp_path) -> None:
     class FencedJsonProvider:
         async def generate(self, prompt: str, model: str | None = None) -> tuple[str, list[str]]:

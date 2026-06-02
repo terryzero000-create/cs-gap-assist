@@ -147,6 +147,7 @@ Implemented:
 - arXiv search client with Atom parsing and deterministic fallback.
 - Semantic Scholar client with live response parsing and deterministic fallback.
 - Semantic Scholar is disabled by default through `ENABLE_SEMANTIC_SCHOLAR=false`; arXiv is the default external literature source.
+- Semantic Scholar access does not require or use an API key on this branch.
 - Model JSON repair and validation for fenced/prose-wrapped JSON, invalid JSON, missing `experiments`, malformed items, and missing required experiment fields.
 - Deterministic fallback experiment generation when model output cannot be repaired.
 - Usable frontend Experiment Suggestion workbench:
@@ -161,7 +162,7 @@ Known limitations:
 
 - Branch is still isolated and has not been merged into an integration branch.
 - arXiv can fail in restricted or offline networks; deterministic fallback keeps the workflow usable.
-- Semantic Scholar is optional and disabled by default because access can be unreliable in mainland China.
+- Semantic Scholar is optional, keyless, and disabled by default because access can be unreliable in mainland China.
 - The workbench depends on stored Gap records from local SQLite history; full Gap generation is still on `codex/research-gap`.
 - Real DeepSeek behavior needs API keys and quality evaluation.
 - Experiment-plan quality is MVP-level and should be evaluated against real papers before production use.

@@ -16,7 +16,6 @@ async def suggest_experiments(request: ExperimentSuggestRequest, settings: Setti
     semantic_warnings: list[str] = []
     if settings.enable_semantic_scholar:
         semantic_papers, semantic_warnings = await SemanticScholarClient(
-            api_key=settings.semantic_scholar_api_key,
             timeout_seconds=settings.external_search_timeout_seconds,
         ).search(query, limit=3)
     arxiv_limit = max(2, 5 - len(semantic_papers))

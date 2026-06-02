@@ -18,13 +18,11 @@ class SemanticScholarClient:
 
     def __init__(
         self,
-        api_key: str | None = None,
         base_url: str = "https://api.semanticscholar.org/graph/v1/paper/search",
         transport: httpx.AsyncBaseTransport | None = None,
         timeout_seconds: float = 3.0,
     ) -> None:
         """Create a Semantic Scholar client."""
-        self.api_key = api_key
         self.base_url = base_url
         self.transport = transport
         self.timeout_seconds = timeout_seconds
@@ -34,10 +32,9 @@ class SemanticScholarClient:
         if not query.strip():
             return [], ["Semantic Scholar query is empty; no external papers searched."]
         params = {"query": query, "limit": str(limit), "fields": "paperId,title,abstract,year,url"}
-        headers = {"x-api-key": self.api_key} if self.api_key else None
         try:
             async with httpx.AsyncClient(transport=self.transport, timeout=self.timeout_seconds) as client:
-                response = await client.get(self.base_url, params=params, headers=headers)
+                response = await client.get(self.base_url, params=params)
                 response.raise_for_status()
             data = response.json()
             papers = [self._paper_from_item(item) for item in data.get("data", []) if item.get("paperId") and item.get("title")]

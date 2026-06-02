@@ -50,7 +50,7 @@ The project has a working repository foundation and one isolated branch per feat
 - Unified error response shape: `{"error": "message", "code": 400}`.
 - Python code should use type annotations and docstrings.
 - Frontend TypeScript uses strict mode and should not introduce `any`.
-- API keys must come from `.env`; do not hardcode keys.
+- Active API keys must come from `.env`; do not hardcode keys.
 - Missing model keys should degrade to mock providers with explicit warnings.
 
 ## Foundation Capabilities
@@ -75,6 +75,13 @@ The project has a working repository foundation and one isolated branch per feat
 - Default embedding provider: OpenAI.
 - Default embedding model: `text-embedding-3-small`.
 - If `DEEPSEEK_API_KEY` or `OPENAI_API_KEY` is missing, the system should still run using mock providers and return warnings.
+
+## External Literature Policy
+
+- arXiv is the default external literature source and does not require an API key.
+- Semantic Scholar is optional and disabled by default with `ENABLE_SEMANTIC_SCHOLAR=false`.
+- Semantic Scholar runs keyless on this project; do not add or require a Semantic Scholar API key.
+- External literature failures degrade to deterministic fallback evidence with warnings.
 
 ## Storage Policy
 

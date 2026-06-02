@@ -1,10 +1,15 @@
 ﻿from fastapi.testclient import TestClient
 
+import asyncio
+
+import httpx
+
 from backend.core.config import get_settings
 from backend.llm.chains import experiment_chain
 from backend.main import app
 from backend.models.schemas import ExperimentPlan, GapItem
 from backend.repositories.sqlite_store import SQLiteStore
+from backend.services.arxiv_search import ArxivSearchClient
 from backend.services.semantic_scholar import ExternalPaper
 
 
@@ -50,7 +55,10 @@ def test_experiment_suggestion_is_persisted(tmp_path, monkeypatch) -> None:
 def test_experiment_suggestion_uses_stored_gap_when_topic_is_omitted(tmp_path, monkeypatch) -> None:
     captured_queries: list[str] = []
 
-    class CapturingSemanticScholarClient:
+    class CapturingArxivSearchClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
         async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
             captured_queries.append(query)
             papers = [
@@ -65,7 +73,7 @@ def test_experiment_suggestion_uses_stored_gap_when_topic_is_omitted(tmp_path, m
             return papers, []
 
     monkeypatch.setenv("SQLITE_URL", str(tmp_path / "experiments.db"))
-    monkeypatch.setattr(experiment_chain, "SemanticScholarClient", CapturingSemanticScholarClient)
+    monkeypatch.setattr(experiment_chain, "ArxivSearchClient", CapturingArxivSearchClient)
     get_settings.cache_clear()
     store = SQLiteStore(get_settings().sqlite_path)
     store.save_gap(
@@ -146,3 +154,66 @@ def test_experiment_history_endpoint_filters_by_gap_id(tmp_path, monkeypatch) ->
     get_settings.cache_clear()
     experiments = response.json()["experiments"]
     assert [experiment["experiment_id"] for experiment in experiments] == [expected.experiment_id]
+
+
+def test_arxiv_client_parses_atom_response_shape() -> None:
+    atom = """<?xml version="1.0" encoding="UTF-8"?>
+    <feed xmlns="http://www.w3.org/2005/Atom">
+      <entry>
+        <id>http://arxiv.org/abs/2501.00001v1</id>
+        <title>Experiment Design for Robust RAG</title>
+        <summary>We evaluate retrieval systems under domain shift.</summary>
+        <published>2025-01-02T00:00:00Z</published>
+      </entry>
+    </feed>
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["search_query"] == "all:rag experiments"
+        return httpx.Response(200, text=atom)
+
+    client = ArxivSearchClient(transport=httpx.MockTransport(handler))
+
+    papers, warnings = asyncio.run(client.search("rag experiments", limit=1))
+
+    assert warnings == []
+    assert papers[0].paper_id == "arxiv-2501.00001"
+    assert papers[0].title == "Experiment Design for Robust RAG"
+    assert papers[0].abstract == "We evaluate retrieval systems under domain shift."
+    assert papers[0].year == 2025
+
+
+def test_experiment_suggestion_skips_semantic_scholar_by_default(monkeypatch, tmp_path) -> None:
+    class BlockingSemanticScholarClient:
+        def __init__(self, *args, **kwargs) -> None:
+            raise AssertionError("Semantic Scholar should be disabled by default.")
+
+    class StubArxivSearchClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
+            return [
+                ExternalPaper(
+                    paper_id=f"arxiv-{index}",
+                    title=f"Experiment support {index}",
+                    abstract="Evidence for experiment design.",
+                    year=2025,
+                )
+                for index in range(1, limit + 1)
+            ], []
+
+    monkeypatch.setenv("SQLITE_URL", str(tmp_path / "experiments.db"))
+    get_settings.cache_clear()
+    monkeypatch.setattr(experiment_chain, "SemanticScholarClient", BlockingSemanticScholarClient)
+    monkeypatch.setattr(experiment_chain, "ArxivSearchClient", StubArxivSearchClient)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/experiments/suggest",
+        json={"gap_id": "gap-arxiv", "topic": "rag experiments"},
+    )
+
+    assert response.status_code == 200
+    get_settings.cache_clear()
+    assert response.json()["experiments"][0]["support_papers"][0] == "arxiv-1"

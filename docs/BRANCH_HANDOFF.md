@@ -142,6 +142,9 @@ Implemented:
 - Resolves a stored Gap by `gap_id` when topic context is omitted, using the Gap title and description for experiment planning.
 - `/api/v1/experiments/history`
 - `/api/v1/gaps/history` for selecting stored Gaps on this branch.
+- arXiv search client with Atom parsing and deterministic fallback.
+- Semantic Scholar client with live response parsing and deterministic fallback.
+- Semantic Scholar is disabled by default through `ENABLE_SEMANTIC_SCHOLAR=false`; arXiv is the default external literature source.
 - Usable frontend Experiment Suggestion workbench:
   - Loads stored Gaps.
   - Selects a Gap or accepts a manual Gap ID.
@@ -153,15 +156,16 @@ Implemented:
 Known limitations:
 
 - Branch is still isolated and has not been merged into an integration branch.
-- Literature retrieval is still mocked through the MVP Semantic Scholar client on this branch.
+- arXiv can fail in restricted or offline networks; deterministic fallback keeps the workflow usable.
+- Semantic Scholar is optional and disabled by default because access can be unreliable in mainland China.
 - The workbench depends on stored Gap records from local SQLite history; full Gap generation is still on `codex/research-gap`.
 - Real DeepSeek behavior needs API keys and quality evaluation.
 
 Next steps:
 
 - Create or update an integration branch when combining feature modules.
-- Replace mocked literature retrieval with the same arXiv/Semantic Scholar fallback policy used by `codex/research-gap`.
 - Add experiment-plan quality evaluation against real Gap records and papers.
+- Consider adding model JSON repair for malformed experiment output, matching the Research Gap branch hardening.
 - Add browser-level QA after integration with the Research Gap module.
 
 Verification on branch:

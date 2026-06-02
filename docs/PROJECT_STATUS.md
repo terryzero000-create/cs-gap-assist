@@ -8,7 +8,7 @@ CS Gap Assist is a research gap analysis assistant for computer science papers. 
 
 ## Current Progress
 
-Overall first-version product progress: about 42%.
+Overall first-version product progress: about 44%.
 
 Foundation progress: about 70%.
 
@@ -30,6 +30,7 @@ The project has a working repository foundation and one isolated branch per feat
   - Adds `/api/v1/experiments/suggest` with datasets, metrics, baselines, steps, risks, and 3-5 support papers.
   - Adds `/api/v1/experiments/history` for persisted experiment plan history.
   - Adds a usable frontend Experiment Suggestion workbench that loads stored Gaps and suggests experiments for the selected Gap.
+  - Uses arXiv as the default external literature source with deterministic fallback; Semantic Scholar is optional and disabled by default.
 - `codex/citation-graph`
   - Citation evolution graph module.
   - Adds `/api/v1/citations/graph` with D3-ready `nodes` and `links`.
@@ -96,8 +97,8 @@ Current foundation verification at the time of this document:
 ## Known MVP Limitations
 
 - Module branches are isolated and have not yet been merged into one integrated application branch.
-- Semantic Scholar and arXiv behavior is mostly deterministic mock/fallback code.
-- The frontend is a skeleton, not a complete user workflow.
+- Some external literature behavior still uses deterministic fallback when live services are unavailable.
+- The Research Gap and Experiment Suggestion branches have usable MVP workflows; other feature branch frontends may still be skeletons.
 - RAG ranking is simple and designed for local development, not production retrieval quality.
 - DeepSeek and OpenAI real calls need real API keys and further integration testing.
 - Chroma is optional in tests; the memory mirror preserves local behavior.

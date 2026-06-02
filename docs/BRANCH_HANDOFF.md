@@ -126,31 +126,50 @@ npm test --prefix frontend
 
 Goal: generate literature-supported experiment plans for each Gap.
 
+Current status: isolated branch MVP mostly complete.
+
+Key commits after foundation merge:
+
+- `240dcef Merge branch 'codex/foundation' into codex/experiment-suggest`
+- `bb2b3bc feat: advance experiment suggestion workflow`
+
 Implemented:
 
 - `/api/v1/experiments/suggest`
 - Returns experiment objective, datasets, metrics, baselines, steps, risks, and support papers.
 - Ensures 3-5 support papers in the test path.
-- Basic frontend component: `frontend/src/components/ExperimentSuggest/ExperimentPlanCard.tsx`.
+- Persists generated experiment plans with `SQLiteStore.save_experiment`.
+- Resolves a stored Gap by `gap_id` when topic context is omitted, using the Gap title and description for experiment planning.
+- `/api/v1/experiments/history`
+- `/api/v1/gaps/history` for selecting stored Gaps on this branch.
+- Usable frontend Experiment Suggestion workbench:
+  - Loads stored Gaps.
+  - Selects a Gap or accepts a manual Gap ID.
+  - Loads saved experiment plans for the active Gap.
+  - Generates new experiment suggestions.
+  - Displays warnings, datasets, metrics, baselines, risks, steps, and support papers.
+- Vite dev proxy for `/api` to `http://127.0.0.1:8000`.
 
 Known limitations:
 
-- Depends on branch-local version of foundation before `ffa00fe`; merge latest `codex/foundation` before continuing.
-- Literature retrieval is mocked.
-- Experiment plans are not yet persisted to SQLite on this branch.
+- Branch is still isolated and has not been merged into an integration branch.
+- Literature retrieval is still mocked through the MVP Semantic Scholar client on this branch.
+- The workbench depends on stored Gap records from local SQLite history; full Gap generation is still on `codex/research-gap`.
+- Real DeepSeek behavior needs API keys and quality evaluation.
 
 Next steps:
 
-- Merge latest `codex/foundation`.
-- Persist experiment suggestions with `SQLiteStore.save_experiment`.
-- Connect suggestions to real Gap records.
-- Add frontend flow from selected Gap to experiment suggestions.
+- Create or update an integration branch when combining feature modules.
+- Replace mocked literature retrieval with the same arXiv/Semantic Scholar fallback policy used by `codex/research-gap`.
+- Add experiment-plan quality evaluation against real Gap records and papers.
+- Add browser-level QA after integration with the Research Gap module.
 
 Verification on branch:
 
 ```powershell
-python -m pytest backend/tests/test_foundation.py backend/tests/test_experiment_suggest.py -q
+python -m pytest backend/tests -q
 npm test --prefix frontend
+npm run build --prefix frontend
 ```
 
 ## codex/citation-graph

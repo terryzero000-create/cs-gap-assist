@@ -3,7 +3,7 @@
 from backend.core.config import get_settings
 from backend.llm.chains import experiment_chain
 from backend.main import app
-from backend.models.schemas import GapItem
+from backend.models.schemas import ExperimentPlan, GapItem
 from backend.repositories.sqlite_store import SQLiteStore
 from backend.services.semantic_scholar import ExternalPaper
 
@@ -108,3 +108,41 @@ def test_gap_history_endpoint_returns_stored_gaps(tmp_path, monkeypatch) -> None
     assert response.status_code == 200
     get_settings.cache_clear()
     assert response.json()["gaps"][0]["gap_id"] == "gap-history"
+
+
+def test_experiment_history_endpoint_filters_by_gap_id(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("SQLITE_URL", str(tmp_path / "experiments.db"))
+    get_settings.cache_clear()
+    store = SQLiteStore(get_settings().sqlite_path)
+    expected = store.save_experiment(
+        ExperimentPlan(
+            gap_id="gap-history",
+            objective="Evaluate benchmark transfer.",
+            datasets=["Dataset A"],
+            metrics=["F1"],
+            baselines=["BM25"],
+            steps=["Run baseline"],
+            risks=["Small sample"],
+            support_papers=["paper-a", "paper-b", "paper-c"],
+        )
+    )
+    store.save_experiment(
+        ExperimentPlan(
+            gap_id="other-gap",
+            objective="Unrelated plan.",
+            datasets=["Dataset B"],
+            metrics=["Accuracy"],
+            baselines=["RAG"],
+            steps=["Run model"],
+            risks=["Noisy labels"],
+            support_papers=["paper-d", "paper-e", "paper-f"],
+        )
+    )
+    client = TestClient(app)
+
+    response = client.get("/api/v1/experiments/history", params={"gap_id": "gap-history"})
+
+    assert response.status_code == 200
+    get_settings.cache_clear()
+    experiments = response.json()["experiments"]
+    assert [experiment["experiment_id"] for experiment in experiments] == [expected.experiment_id]

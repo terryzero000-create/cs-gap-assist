@@ -8,6 +8,13 @@ from backend.repositories.sqlite_store import SQLiteStore
 router = APIRouter(prefix="/experiments", tags=["experiments"])
 
 
+@router.get("/history", response_model=ExperimentSuggestResponse)
+async def list_experiment_history(gap_id: str | None = None) -> ExperimentSuggestResponse:
+    """Return persisted experiment suggestions, optionally filtered by gap."""
+    settings = get_settings()
+    return ExperimentSuggestResponse(experiments=SQLiteStore(settings.sqlite_path).list_experiments(gap_id=gap_id))
+
+
 @router.post("/suggest", response_model=ExperimentSuggestResponse)
 async def suggest_experiment(request: ExperimentSuggestRequest) -> ExperimentSuggestResponse:
     """Suggest concrete experiments for a research gap with literature support."""

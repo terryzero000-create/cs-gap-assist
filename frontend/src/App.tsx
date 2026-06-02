@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { listGapHistory, suggestExperiments } from './api/client';
+import { listExperimentHistory, listGapHistory, suggestExperiments } from './api/client';
 import { ExperimentPlanCard } from './components/ExperimentSuggest/ExperimentPlanCard';
 import './style.css';
 import type { ExperimentPlan, GapItem } from './types';
@@ -14,6 +14,7 @@ export function App() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoadingGaps, setIsLoadingGaps] = useState(false);
+  const [isLoadingPlans, setIsLoadingPlans] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
 
   const selectedGap = useMemo(() => gaps.find((gap) => gap.gap_id === selectedGapId), [gaps, selectedGapId]);
@@ -23,6 +24,14 @@ export function App() {
   useEffect(() => {
     void loadGaps();
   }, []);
+
+  useEffect(() => {
+    if (activeGapId) {
+      void loadPlans(activeGapId);
+    } else {
+      setPlans([]);
+    }
+  }, [activeGapId]);
 
   async function loadGaps(): Promise<void> {
     setIsLoadingGaps(true);
@@ -54,6 +63,20 @@ export function App() {
       setError(caught instanceof Error ? caught.message : 'Could not suggest experiments');
     } finally {
       setIsSuggesting(false);
+    }
+  }
+
+  async function loadPlans(gapId: string): Promise<void> {
+    setIsLoadingPlans(true);
+    setError(null);
+    try {
+      const result = await listExperimentHistory(gapId);
+      setPlans(result.experiments);
+      setWarnings(result.warnings);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not load experiment history');
+    } finally {
+      setIsLoadingPlans(false);
     }
   }
 
@@ -127,6 +150,13 @@ export function App() {
             </div>
             {selectedGap ? <span className="value-badge">{selectedGap.value_level}</span> : null}
           </section>
+
+          <div className="plan-toolbar">
+            <span>{plans.length} saved plan{plans.length === 1 ? '' : 's'}</span>
+            <button className="secondary-button" type="button" onClick={() => void loadPlans(activeGapId)} disabled={!activeGapId || isLoadingPlans}>
+              {isLoadingPlans ? 'Loading' : 'Reload plans'}
+            </button>
+          </div>
 
           <div className="suggest-form">
             <label htmlFor="topic">Optional topic context</label>

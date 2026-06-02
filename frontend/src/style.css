@@ -229,6 +229,22 @@ textarea:focus {
   margin-bottom: 18px;
 }
 
+.plan-toolbar {
+  align-items: center;
+  border-bottom: 1px solid #cfc6b7;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+}
+
+.plan-toolbar span {
+  color: #5b625d;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 button,
 .secondary-button {
   background: #254737;
@@ -368,6 +384,11 @@ li {
   }
 
   .selected-gap {
+    display: grid;
+  }
+
+  .plan-toolbar {
+    align-items: stretch;
     display: grid;
   }
 }

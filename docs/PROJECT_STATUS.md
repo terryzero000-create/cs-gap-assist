@@ -8,7 +8,7 @@ CS Gap Assist is a research gap analysis assistant for computer science papers. 
 
 ## Current Progress
 
-Overall first-version product progress: about 30%.
+Overall first-version product progress: about 42%.
 
 Foundation progress: about 70%.
 
@@ -28,6 +28,8 @@ The project has a working repository foundation and one isolated branch per feat
 - `codex/experiment-suggest`
   - Experiment suggestion module.
   - Adds `/api/v1/experiments/suggest` with datasets, metrics, baselines, steps, risks, and 3-5 support papers.
+  - Adds `/api/v1/experiments/history` for persisted experiment plan history.
+  - Adds a usable frontend Experiment Suggestion workbench that loads stored Gaps and suggests experiments for the selected Gap.
 - `codex/citation-graph`
   - Citation evolution graph module.
   - Adds `/api/v1/citations/graph` with D3-ready `nodes` and `links`.

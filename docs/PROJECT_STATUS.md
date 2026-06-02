@@ -1,6 +1,6 @@
 # CS Gap Assist Project Status
 
-Last updated: 2026-05-27
+Last updated: 2026-06-02
 
 ## Purpose
 
@@ -8,9 +8,11 @@ CS Gap Assist is a research gap analysis assistant for computer science papers. 
 
 ## Current Progress
 
-Overall first-version product progress: about 44%.
+Overall first-version product progress: about 45%.
 
 Foundation progress: about 70%.
+
+Experiment Suggestion branch MVP progress: 100% for isolated branch handoff.
 
 The project has a working repository foundation and one isolated branch per feature module. The current implementation is still an MVP scaffold: several external integrations use deterministic mock/fallback behavior so development can continue without API keys or quota.
 
@@ -31,6 +33,7 @@ The project has a working repository foundation and one isolated branch per feat
   - Adds `/api/v1/experiments/history` for persisted experiment plan history.
   - Adds a usable frontend Experiment Suggestion workbench that loads stored Gaps and suggests experiments for the selected Gap.
   - Uses arXiv as the default external literature source with deterministic fallback; Semantic Scholar is optional and disabled by default.
+  - Repairs fenced/prose-wrapped or invalid model JSON and falls back to deterministic experiment plans when needed.
 - `codex/citation-graph`
   - Citation evolution graph module.
   - Adds `/api/v1/citations/graph` with D3-ready `nodes` and `links`.

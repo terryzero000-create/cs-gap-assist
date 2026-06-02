@@ -1,13 +1,14 @@
 ﻿from fastapi.testclient import TestClient
 
 import asyncio
+import json
 
 import httpx
 
-from backend.core.config import get_settings
+from backend.core.config import Settings, get_settings
 from backend.llm.chains import experiment_chain
 from backend.main import app
-from backend.models.schemas import ExperimentPlan, GapItem
+from backend.models.schemas import ExperimentPlan, ExperimentSuggestRequest, GapItem
 from backend.repositories.sqlite_store import SQLiteStore
 from backend.services.arxiv_search import ArxivSearchClient
 from backend.services.semantic_scholar import ExternalPaper
@@ -217,3 +218,86 @@ def test_experiment_suggestion_skips_semantic_scholar_by_default(monkeypatch, tm
     assert response.status_code == 200
     get_settings.cache_clear()
     assert response.json()["experiments"][0]["support_papers"][0] == "arxiv-1"
+
+
+def test_experiment_suggestion_repairs_fenced_json(monkeypatch, tmp_path) -> None:
+    class FencedJsonProvider:
+        async def generate(self, prompt: str, model: str | None = None) -> tuple[str, list[str]]:
+            payload = {
+                "experiments": [
+                    {
+                        "objective": "Evaluate drift-aware retrieval robustness.",
+                        "datasets": ["Dataset A"],
+                        "metrics": ["F1"],
+                        "baselines": ["BM25"],
+                        "steps": ["Run cross-domain split"],
+                        "risks": ["Limited labels"],
+                    }
+                ]
+            }
+            return f"Here is the plan:\n```json\n{json.dumps(payload)}\n```", ["used test provider"]
+
+    class StubArxivSearchClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
+            return [
+                ExternalPaper(
+                    paper_id=f"arxiv-{index}",
+                    title=f"Support paper {index}",
+                    abstract="Evidence for experiment design.",
+                    year=2025,
+                )
+                for index in range(1, limit + 1)
+            ], []
+
+    monkeypatch.setattr(experiment_chain, "ArxivSearchClient", StubArxivSearchClient)
+    monkeypatch.setattr(experiment_chain, "get_chat_provider", lambda settings, provider=None: FencedJsonProvider())
+
+    response = asyncio.run(
+        experiment_chain.suggest_experiments(
+            ExperimentSuggestRequest(gap_id="gap-fenced", topic="rag drift"),
+            Settings(sqlite_url=f"sqlite:///{tmp_path / 'experiment.db'}"),
+        )
+    )
+
+    assert response.experiments[0].objective == "Evaluate drift-aware retrieval robustness."
+    assert response.experiments[0].support_papers == ["arxiv-1", "arxiv-2", "arxiv-3", "arxiv-4", "arxiv-5"]
+    assert "used test provider" in response.warnings
+
+
+def test_experiment_suggestion_falls_back_for_invalid_model_output(monkeypatch, tmp_path) -> None:
+    class InvalidJsonProvider:
+        async def generate(self, prompt: str, model: str | None = None) -> tuple[str, list[str]]:
+            return "not json", ["used invalid provider"]
+
+    class StubArxivSearchClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
+            return [
+                ExternalPaper(
+                    paper_id=f"arxiv-{index}",
+                    title=f"Support paper {index}",
+                    abstract="Evidence for experiment design.",
+                    year=2025,
+                )
+                for index in range(1, limit + 1)
+            ], []
+
+    monkeypatch.setattr(experiment_chain, "ArxivSearchClient", StubArxivSearchClient)
+    monkeypatch.setattr(experiment_chain, "get_chat_provider", lambda settings, provider=None: InvalidJsonProvider())
+
+    response = asyncio.run(
+        experiment_chain.suggest_experiments(
+            ExperimentSuggestRequest(gap_id="gap-invalid", topic="rag drift"),
+            Settings(sqlite_url=f"sqlite:///{tmp_path / 'experiment.db'}"),
+        )
+    )
+
+    assert response.experiments[0].gap_id == "gap-invalid"
+    assert response.experiments[0].datasets
+    assert len(response.experiments[0].support_papers) == 5
+    assert "Model did not return valid experiment JSON; using deterministic fallback experiment." in response.warnings

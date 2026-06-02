@@ -126,12 +126,14 @@ npm test --prefix frontend
 
 Goal: generate literature-supported experiment plans for each Gap.
 
-Current status: isolated branch MVP mostly complete.
+Current status: isolated branch MVP complete.
 
 Key commits after foundation merge:
 
 - `240dcef Merge branch 'codex/foundation' into codex/experiment-suggest`
 - `bb2b3bc feat: advance experiment suggestion workflow`
+- `43a0657 feat: add experiment history workflow`
+- `b812a19 feat: add arxiv-backed experiment evidence`
 
 Implemented:
 
@@ -145,6 +147,8 @@ Implemented:
 - arXiv search client with Atom parsing and deterministic fallback.
 - Semantic Scholar client with live response parsing and deterministic fallback.
 - Semantic Scholar is disabled by default through `ENABLE_SEMANTIC_SCHOLAR=false`; arXiv is the default external literature source.
+- Model JSON repair and validation for fenced/prose-wrapped JSON, invalid JSON, missing `experiments`, malformed items, and missing required experiment fields.
+- Deterministic fallback experiment generation when model output cannot be repaired.
 - Usable frontend Experiment Suggestion workbench:
   - Loads stored Gaps.
   - Selects a Gap or accepts a manual Gap ID.
@@ -160,12 +164,12 @@ Known limitations:
 - Semantic Scholar is optional and disabled by default because access can be unreliable in mainland China.
 - The workbench depends on stored Gap records from local SQLite history; full Gap generation is still on `codex/research-gap`.
 - Real DeepSeek behavior needs API keys and quality evaluation.
+- Experiment-plan quality is MVP-level and should be evaluated against real papers before production use.
 
 Next steps:
 
 - Create or update an integration branch when combining feature modules.
 - Add experiment-plan quality evaluation against real Gap records and papers.
-- Consider adding model JSON repair for malformed experiment output, matching the Research Gap branch hardening.
 - Add browser-level QA after integration with the Research Gap module.
 
 Verification on branch:

@@ -104,6 +104,11 @@ h2 {
   padding: 16px;
 }
 
+.paper-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .file-button,
 button {
   background: #0f766e;

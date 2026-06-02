@@ -1,4 +1,4 @@
-import type { GapAnalysisResponse, ModelConfig, PaperUploadResponse } from '../types';
+import type { GapAnalysisResponse, ModelConfig, PaperListResponse, PaperUploadResponse } from '../types';
 
 const API_PREFIX = '/api/v1';
 
@@ -15,6 +15,10 @@ export async function uploadPaper(file: File): Promise<PaperUploadResponse> {
   const form = new FormData();
   form.append('file', file);
   return parseResponse<PaperUploadResponse>(await fetch(`${API_PREFIX}/papers/upload`, { method: 'POST', body: form }));
+}
+
+export async function listPapers(): Promise<PaperListResponse> {
+  return parseResponse<PaperListResponse>(await fetch(`${API_PREFIX}/papers`));
 }
 
 export async function analyzeGaps(topic: string, docIds: string[], modelConfig?: ModelConfig): Promise<GapAnalysisResponse> {

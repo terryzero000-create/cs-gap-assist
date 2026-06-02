@@ -70,6 +70,12 @@ class PaperRecord(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class PaperListResponse(BaseModel):
+    """Stored paper listing response."""
+
+    papers: list[PaperRecord]
+
+
 class ReadingQARequest(BaseModel):
     """Question request over uploaded papers."""
 

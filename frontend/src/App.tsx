@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { analyzeGaps, listGapHistory, uploadPaper } from './api/client';
+import { analyzeGaps, listGapHistory, listPapers, uploadPaper } from './api/client';
 import { GapList } from './components/GapAnalysis/GapList';
 import './style.css';
 import type { GapItem, PaperUploadResponse } from './types';
 
 interface UploadedPaper extends PaperUploadResponse {
   selected: boolean;
+  created_at?: string;
 }
 
 export function App() {
@@ -16,6 +17,7 @@ export function App() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isLoadingPapers, setIsLoadingPapers] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,6 +25,7 @@ export function App() {
   const canAnalyze = topic.trim().length > 0 && selectedDocIds.length > 0 && !isAnalyzing;
 
   useEffect(() => {
+    void loadPapers();
     void loadHistory();
   }, []);
 
@@ -72,6 +75,28 @@ export function App() {
     }
   }
 
+  async function loadPapers(): Promise<void> {
+    setIsLoadingPapers(true);
+    setError(null);
+    try {
+      const result = await listPapers();
+      setPapers(
+        result.papers.map((paper) => ({
+          doc_id: paper.doc_id,
+          title: paper.title,
+          chunk_count: 0,
+          warnings: [],
+          selected: true,
+          created_at: paper.created_at,
+        })),
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not load papers');
+    } finally {
+      setIsLoadingPapers(false);
+    }
+  }
+
   function togglePaper(docId: string): void {
     setPapers((current) => current.map((paper) => (paper.doc_id === docId ? { ...paper, selected: !paper.selected } : paper)));
   }
@@ -90,10 +115,15 @@ export function App() {
         <aside className="sidebar" aria-label="Papers">
           <div className="panel-header">
             <h2>Papers</h2>
-            <label className="file-button">
-              {isUploading ? 'Uploading' : 'Upload PDF'}
-              <input type="file" accept="application/pdf" onChange={(event) => void handleUpload(event.target.files)} />
-            </label>
+            <div className="paper-actions">
+              <button className="secondary-button" type="button" onClick={() => void loadPapers()} disabled={isLoadingPapers}>
+                {isLoadingPapers ? 'Loading' : 'Refresh'}
+              </button>
+              <label className="file-button">
+                {isUploading ? 'Uploading' : 'Upload PDF'}
+                <input type="file" accept="application/pdf" onChange={(event) => void handleUpload(event.target.files)} />
+              </label>
+            </div>
           </div>
           <div className="paper-list">
             {papers.length === 0 ? (
@@ -104,7 +134,7 @@ export function App() {
                   <input type="checkbox" checked={paper.selected} onChange={() => togglePaper(paper.doc_id)} />
                   <span>
                     <strong>{paper.title}</strong>
-                    <small>{paper.chunk_count} chunks</small>
+                    <small>{paper.chunk_count > 0 ? `${paper.chunk_count} chunks` : `created ${new Date(paper.created_at ?? '').toLocaleDateString()}`}</small>
                   </span>
                 </label>
               ))

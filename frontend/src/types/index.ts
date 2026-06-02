@@ -17,6 +17,18 @@ export interface PaperUploadResponse {
   warnings: string[];
 }
 
+export interface PaperRecord {
+  doc_id: string;
+  title: string;
+  created_at: string;
+  is_favorite: boolean;
+  tags: string[];
+}
+
+export interface PaperListResponse {
+  papers: PaperRecord[];
+}
+
 export interface SourceParagraph {
   doc_id: string;
   chunk_id: string;

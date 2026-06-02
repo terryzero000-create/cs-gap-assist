@@ -40,6 +40,21 @@ def test_pdf_upload_returns_doc_id_and_chunks(tmp_path) -> None:
     assert body["title"] == "paper.pdf"
 
 
+def test_paper_list_returns_uploaded_papers() -> None:
+    client = TestClient(app)
+    upload = client.post(
+        "/api/v1/papers/upload",
+        files={"file": ("listed.pdf", b"Listed paper content for gap analysis.", "application/pdf")},
+    )
+    doc_id = upload.json()["doc_id"]
+
+    response = client.get("/api/v1/papers")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert any(paper["doc_id"] == doc_id and paper["title"] == "listed.pdf" for paper in body["papers"])
+
+
 def test_uniform_error_shape_for_bad_upload() -> None:
     client = TestClient(app)
 

@@ -111,7 +111,7 @@ Implemented:
 - `/api/v1/gaps/history`
 - `/api/v1/papers`
 - Real arXiv Atom response parsing with deterministic fallback.
-- Semantic Scholar client remains available as optional code, but is disabled by default with `ENABLE_SEMANTIC_SCHOLAR=false`.
+- Semantic Scholar is deprecated and is no longer present in the Research Gap backend.
 - Model JSON repair and validation for fenced/prose-wrapped JSON, unsupported `value_level`, missing evidence, and malformed items.
 - Persists gaps in SQLite.
 - Usable frontend Research Gap workbench:
@@ -133,9 +133,6 @@ Next steps:
 
 - Create or update an integration branch when combining feature modules.
 - Run real-key evaluation with `DEEPSEEK_API_KEY` and `OPENAI_API_KEY`.
-- Optionally enable Semantic Scholar only in environments where it is reachable:
-  - `ENABLE_SEMANTIC_SCHOLAR=true`
-  - `SEMANTIC_SCHOLAR_API_KEY=<key>`
 - Add browser-level QA when a browser automation dependency is available.
 
 Verification on branch:
@@ -201,7 +198,7 @@ Known limitations:
 Next steps:
 
 - Merge latest `codex/foundation`.
-- Add real citation expansion through Semantic Scholar when available.
+- Add real citation expansion through non-Semantic-Scholar providers when available.
 - Add graph size caps and key-node scoring policy.
 - Add keyword search UI.
 

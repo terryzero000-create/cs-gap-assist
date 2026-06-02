@@ -51,6 +51,7 @@ The project has a working repository foundation and one isolated branch per feat
 - Frontend TypeScript uses strict mode and should not introduce `any`.
 - API keys must come from `.env`; do not hardcode keys.
 - Missing model keys should degrade to mock providers with explicit warnings.
+- Semantic Scholar is deprecated for this project and must not be used for new citation or literature retrieval work.
 
 ## Foundation Capabilities
 
@@ -78,8 +79,7 @@ The project has a working repository foundation and one isolated branch per feat
 ## External Literature Policy
 
 - arXiv is the default external literature source and does not require an API key.
-- Semantic Scholar is optional and disabled by default with `ENABLE_SEMANTIC_SCHOLAR=false` because access can be unreliable in mainland China.
-- `SEMANTIC_SCHOLAR_API_KEY` is not required for the current Research Gap MVP.
+- Semantic Scholar is deprecated and is not used by the Research Gap branch.
 - External literature failures degrade to deterministic fallback evidence with warnings.
 
 ## Storage Policy
@@ -106,7 +106,7 @@ Current foundation verification at the time of this document:
 ## Known MVP Limitations
 
 - Module branches are isolated and have not yet been merged into one integrated application branch.
-- Semantic Scholar is optional and disabled by default; arXiv has live parsing plus deterministic fallback behavior.
+- arXiv has live parsing plus deterministic fallback behavior; Semantic Scholar is deprecated and not used.
 - The Research Gap frontend is a usable MVP workflow; other feature branch frontends may still be skeletons.
 - RAG ranking is simple and designed for local development, not production retrieval quality.
 - DeepSeek and OpenAI real calls need real API keys and further integration testing.

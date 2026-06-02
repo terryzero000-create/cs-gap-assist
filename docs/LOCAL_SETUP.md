@@ -43,11 +43,10 @@ The app still runs without these keys by using deterministic mock providers with
 Default external literature behavior:
 
 ```env
-ENABLE_SEMANTIC_SCHOLAR=false
 EXTERNAL_SEARCH_TIMEOUT_SECONDS=3
 ```
 
-Semantic Scholar is disabled by default because access can be unreliable in mainland China. arXiv does not require an API key and is used as the default external literature source, with deterministic fallback behavior when unavailable.
+Semantic Scholar is deprecated and is not used by the Research Gap branch. arXiv does not require an API key and is used as the external literature source, with deterministic fallback behavior when unavailable.
 
 ## Run Locally
 

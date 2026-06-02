@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 
 import httpx
 from fastapi.testclient import TestClient
@@ -9,7 +10,6 @@ from backend.llm.chains import gap_chain
 from backend.main import app
 from backend.models.schemas import GapAnalysisRequest
 from backend.services.arxiv_search import ArxivSearchClient
-from backend.services.semantic_scholar import SemanticScholarClient
 
 
 def test_gap_analysis_returns_contract_shape() -> None:
@@ -57,32 +57,17 @@ def test_gap_history_returns_persisted_results() -> None:
     assert any(gap["gap_id"] == gap_id for gap in body["gaps"])
 
 
-def test_semantic_scholar_client_parses_live_response_shape() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.params["fields"] == "paperId,title,abstract,year,url"
-        return httpx.Response(
-            200,
-            json={
-                "data": [
-                    {
-                        "paperId": "abc123",
-                        "title": "Robust RAG Evaluation",
-                        "abstract": "Benchmarks expose cross-domain failures.",
-                        "year": 2025,
-                    }
-                ]
-            },
-        )
+def test_backend_production_code_does_not_reference_deprecated_literature_provider() -> None:
+    backend_root = Path(__file__).resolve().parents[1]
+    deprecated = "semantic" + "_scholar"
 
-    client = SemanticScholarClient(transport=httpx.MockTransport(handler))
+    offenders = [
+        path.relative_to(backend_root)
+        for path in backend_root.rglob("*.py")
+        if "tests" not in path.parts and deprecated in path.read_text(encoding="utf-8").lower()
+    ]
 
-    papers, warnings = asyncio.run(client.search("rag robustness", limit=1))
-
-    assert warnings == []
-    assert papers[0].paper_id == "semantic-abc123"
-    assert papers[0].title == "Robust RAG Evaluation"
-    assert papers[0].abstract == "Benchmarks expose cross-domain failures."
-    assert papers[0].year == 2025
+    assert offenders == []
 
 
 def test_arxiv_client_parses_atom_response_shape() -> None:
@@ -110,23 +95,6 @@ def test_arxiv_client_parses_atom_response_shape() -> None:
     assert papers[0].title == "RAG Robustness Under Shift"
     assert papers[0].abstract == "We study retrieval robustness under domain shift."
     assert papers[0].year == 2025
-
-
-def test_gap_analysis_skips_semantic_scholar_by_default(monkeypatch, tmp_path) -> None:
-    class BlockingSemanticScholarClient:
-        def __init__(self, *args, **kwargs) -> None:
-            raise AssertionError("Semantic Scholar should be disabled by default.")
-
-    monkeypatch.setattr(gap_chain, "SemanticScholarClient", BlockingSemanticScholarClient)
-
-    response = asyncio.run(
-        gap_chain.analyze_research_gaps(
-            GapAnalysisRequest(topic="rag robustness", doc_ids=[]),
-            Settings(sqlite_url=f"sqlite:///{tmp_path / 'gap.db'}", external_search_timeout_seconds=0.01),
-        )
-    )
-
-    assert response.gaps
 
 
 def test_gap_analysis_repairs_fenced_json_and_normalizes_values(monkeypatch, tmp_path) -> None:

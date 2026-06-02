@@ -8,23 +8,16 @@ from backend.models.schemas import GapAnalysisRequest, GapAnalysisResponse, GapI
 from backend.rag.vector_store import vector_store
 from backend.repositories.sqlite_store import SQLiteStore
 from backend.services.arxiv_search import ArxivSearchClient
-from backend.services.semantic_scholar import ExternalPaper, SemanticScholarClient
+from backend.services.external_paper import ExternalPaper
 
 
 async def analyze_research_gaps(request: GapAnalysisRequest, settings: Settings) -> GapAnalysisResponse:
     """Analyze research gaps from local papers and external literature evidence."""
-    semantic_papers: list[ExternalPaper] = []
-    semantic_warnings: list[str] = []
-    if settings.enable_semantic_scholar:
-        semantic_papers, semantic_warnings = await SemanticScholarClient(
-            api_key=settings.semantic_scholar_api_key,
-            timeout_seconds=settings.external_search_timeout_seconds,
-        ).search(request.topic, limit=3)
     arxiv_papers, arxiv_warnings = await ArxivSearchClient(timeout_seconds=settings.external_search_timeout_seconds).search(
         request.topic,
-        limit=2,
+        limit=5,
     )
-    evidence_pool = [*semantic_papers, *arxiv_papers]
+    evidence_pool = arxiv_papers
     local_context = "\n".join(chunk.text for chunk in vector_store.all_chunks(request.doc_ids)[:5])
     external_context = "\n".join(f"{paper.paper_id}: {paper.title}. {paper.abstract}" for paper in evidence_pool)
     prompt = (
@@ -42,7 +35,7 @@ async def analyze_research_gaps(request: GapAnalysisRequest, settings: Settings)
     store = SQLiteStore(settings.sqlite_path)
     for gap in gaps:
         store.save_gap(gap)
-    return GapAnalysisResponse(gaps=gaps, warnings=[*semantic_warnings, *arxiv_warnings, *chat_warnings, *repair_warnings])
+    return GapAnalysisResponse(gaps=gaps, warnings=[*arxiv_warnings, *chat_warnings, *repair_warnings])
 
 
 def _parse_gap_items(raw_text: str, evidence_pool: list[ExternalPaper], topic: str) -> tuple[list[GapItem], list[str]]:

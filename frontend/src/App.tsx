@@ -1,11 +1,24 @@
-import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 
-import { askPaper, uploadPaper } from './api/client';
+import { analyzeGaps, askPaper, listGapHistory, listPapers, uploadPaper } from './api/client';
+import { GapList } from './components/GapAnalysis/GapList';
 import { ReadingQA } from './components/PaperUpload/ReadingQA';
 import './style.css';
-import type { PaperUploadResponse, ReadingQAHistoryItem, ReadingQAResponse } from './types';
+import type { GapItem, PaperUploadResponse, ReadingQAHistoryItem, ReadingQAResponse } from './types';
+
+type ModuleKey = 'reading' | 'gaps';
+
+interface UploadedPaper extends PaperUploadResponse {
+  selected: boolean;
+  created_at?: string;
+}
 
 const historyStorageKey = 'cs-gap-assist-reading-qa-history';
+
+const modules: { key: ModuleKey; label: string }[] = [
+  { key: 'reading', label: 'Reading QA' },
+  { key: 'gaps', label: 'Research Gap' },
+];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -38,36 +51,55 @@ function loadReadingQAHistory(): ReadingQAHistoryItem[] {
 }
 
 export function App() {
-  const [papers, setPapers] = useState<PaperUploadResponse[]>([]);
-  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
+  const [activeModule, setActiveModule] = useState<ModuleKey>('reading');
+  const [readingPapers, setReadingPapers] = useState<PaperUploadResponse[]>([]);
+  const [selectedReadingDocIds, setSelectedReadingDocIds] = useState<string[]>([]);
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState<ReadingQAResponse | null>(null);
   const [history, setHistory] = useState<ReadingQAHistoryItem[]>(loadReadingQAHistory);
-  const [isUploading, setIsUploading] = useState(false);
+  const [isUploadingReadingPaper, setIsUploadingReadingPaper] = useState(false);
   const [isAsking, setIsAsking] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [readingUploadError, setReadingUploadError] = useState<string | null>(null);
   const [qaError, setQaError] = useState<string | null>(null);
+
+  const [topic, setTopic] = useState('');
+  const [gapPapers, setGapPapers] = useState<UploadedPaper[]>([]);
+  const [gaps, setGaps] = useState<GapItem[]>([]);
+  const [gapWarnings, setGapWarnings] = useState<string[]>([]);
+  const [isUploadingGapPaper, setIsUploadingGapPaper] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isLoadingPapers, setIsLoadingPapers] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [gapError, setGapError] = useState<string | null>(null);
+
+  const selectedGapDocIds = useMemo(() => gapPapers.filter((paper) => paper.selected).map((paper) => paper.doc_id), [gapPapers]);
+  const canAnalyze = topic.trim().length > 0 && selectedGapDocIds.length > 0 && !isAnalyzing;
 
   useEffect(() => {
     window.localStorage.setItem(historyStorageKey, JSON.stringify(history));
   }, [history]);
 
-  async function handleUpload(event: ChangeEvent<HTMLInputElement>) {
+  useEffect(() => {
+    void loadGapPapers();
+    void loadGapHistory();
+  }, []);
+
+  async function handleReadingUpload(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     if (files.length === 0) {
       return;
     }
 
-    setIsUploading(true);
-    setUploadError(null);
+    setIsUploadingReadingPaper(true);
+    setReadingUploadError(null);
     try {
       const uploaded = await Promise.all(files.map((file) => uploadPaper(file)));
-      setPapers((current) => [...current, ...uploaded]);
-      setSelectedDocIds((current) => [...current, ...uploaded.map((paper) => paper.doc_id)]);
+      setReadingPapers((current) => [...current, ...uploaded]);
+      setSelectedReadingDocIds((current) => [...current, ...uploaded.map((paper) => paper.doc_id)]);
     } catch (error) {
-      setUploadError(error instanceof Error ? error.message : '上传失败，请稍后重试。');
+      setReadingUploadError(error instanceof Error ? error.message : 'Upload failed. Please try again.');
     } finally {
-      setIsUploading(false);
+      setIsUploadingReadingPaper(false);
       event.target.value = '';
     }
   }
@@ -75,51 +107,41 @@ export function App() {
   async function handleAsk(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmedQuestion = question.trim();
-    if (!trimmedQuestion || selectedDocIds.length === 0) {
+    if (!trimmedQuestion || selectedReadingDocIds.length === 0) {
       return;
     }
 
     setIsAsking(true);
     setQaError(null);
     try {
-      const selectedPapers = papers.filter((paper) => selectedDocIds.includes(paper.doc_id));
-      const response = await askPaper(trimmedQuestion, selectedDocIds);
+      const selectedPapers = readingPapers.filter((paper) => selectedReadingDocIds.includes(paper.doc_id));
+      const response = await askPaper(trimmedQuestion, selectedReadingDocIds);
       setAnswer(response);
       setHistory((current) => [
         {
           id: `${Date.now()}`,
           question: trimmedQuestion,
           paperTitles: selectedPapers.map((paper) => paper.title),
-          createdAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          createdAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
           result: response,
         },
         ...current,
       ].slice(0, 8));
     } catch (error) {
-      setQaError(error instanceof Error ? error.message : '提问失败，请稍后重试。');
+      setQaError(error instanceof Error ? error.message : 'Question failed. Please try again.');
     } finally {
       setIsAsking(false);
     }
   }
 
-  function handlePaperSelection(docId: string, checked: boolean) {
-    setSelectedDocIds((current) => (checked ? [...current, docId] : current.filter((selectedDocId) => selectedDocId !== docId)));
+  function handleReadingPaperSelection(docId: string, checked: boolean) {
+    setSelectedReadingDocIds((current) => (checked ? [...current, docId] : current.filter((selectedDocId) => selectedDocId !== docId)));
     setAnswer(null);
   }
 
-  function removePaper(docId: string) {
-    setPapers((current) => current.filter((paper) => paper.doc_id !== docId));
-    setSelectedDocIds((current) => current.filter((selectedDocId) => selectedDocId !== docId));
-    setAnswer(null);
-  }
-
-  function selectAllPapers() {
-    setSelectedDocIds(papers.map((paper) => paper.doc_id));
-    setAnswer(null);
-  }
-
-  function clearPaperSelection() {
-    setSelectedDocIds([]);
+  function removeReadingPaper(docId: string) {
+    setReadingPapers((current) => current.filter((paper) => paper.doc_id !== docId));
+    setSelectedReadingDocIds((current) => current.filter((selectedDocId) => selectedDocId !== docId));
     setAnswer(null);
   }
 
@@ -129,78 +151,229 @@ export function App() {
     setQaError(null);
   }
 
-  function clearHistory() {
-    setHistory([]);
+  async function handleGapUpload(fileList: FileList | null): Promise<void> {
+    const file = fileList?.[0];
+    if (!file) {
+      return;
+    }
+    setIsUploadingGapPaper(true);
+    setGapError(null);
+    try {
+      const result = await uploadPaper(file);
+      setGapPapers((current) => [{ ...result, selected: true }, ...current]);
+      setGapWarnings(result.warnings);
+    } catch (caught) {
+      setGapError(caught instanceof Error ? caught.message : 'Upload failed');
+    } finally {
+      setIsUploadingGapPaper(false);
+    }
+  }
+
+  async function handleAnalyze(): Promise<void> {
+    setIsAnalyzing(true);
+    setGapError(null);
+    try {
+      const result = await analyzeGaps(topic.trim(), selectedGapDocIds);
+      setGaps(result.gaps);
+      setGapWarnings(result.warnings);
+    } catch (caught) {
+      setGapError(caught instanceof Error ? caught.message : 'Analysis failed');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
+  async function loadGapHistory(): Promise<void> {
+    setIsLoadingHistory(true);
+    setGapError(null);
+    try {
+      const result = await listGapHistory();
+      setGaps(result.gaps);
+      setGapWarnings(result.warnings);
+    } catch (caught) {
+      setGapError(caught instanceof Error ? caught.message : 'Could not load gap history');
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }
+
+  async function loadGapPapers(): Promise<void> {
+    setIsLoadingPapers(true);
+    setGapError(null);
+    try {
+      const result = await listPapers();
+      setGapPapers(
+        result.papers.map((paper) => ({
+          doc_id: paper.doc_id,
+          title: paper.title,
+          chunk_count: 0,
+          warnings: [],
+          selected: true,
+          created_at: paper.created_at,
+        })),
+      );
+    } catch (caught) {
+      setGapError(caught instanceof Error ? caught.message : 'Could not load papers');
+    } finally {
+      setIsLoadingPapers(false);
+    }
+  }
+
+  function toggleGapPaper(docId: string): void {
+    setGapPapers((current) => current.map((paper) => (paper.doc_id === docId ? { ...paper, selected: !paper.selected } : paper)));
   }
 
   return (
-    <main className="shell">
-      <header className="app-header">
-        <p className="eyebrow">CS Gap Assist</p>
-        <h1>论文精读问答</h1>
-        <p>上传论文后，围绕全文提问，答案会附带可追溯的来源段落。</p>
+    <main className="app-shell">
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">CS Gap Assist</p>
+          <h1>Research workflow MVP</h1>
+        </div>
+        <nav className="module-tabs" aria-label="Modules">
+          {modules.map((module) => (
+            <button
+              aria-pressed={activeModule === module.key}
+              className={activeModule === module.key ? 'module-tab active' : 'module-tab'}
+              key={module.key}
+              onClick={() => setActiveModule(module.key)}
+              type="button"
+            >
+              {module.label}
+            </button>
+          ))}
+        </nav>
       </header>
 
-      <section className="workspace" aria-label="论文精读工作台">
-        <aside className="upload-panel">
-          <div>
-            <h2>论文</h2>
-            <p className="panel-copy">已上传 {papers.length} 篇，已选择 {selectedDocIds.length} 篇</p>
-          </div>
-
-          <label className="upload-dropzone">
-            <span>{isUploading ? '上传中...' : '选择 PDF'}</span>
-            <input accept="application/pdf" disabled={isUploading} multiple onChange={handleUpload} type="file" />
-          </label>
-
-          {uploadError ? <p className="alert" role="alert">{uploadError}</p> : null}
-
-          {papers.length > 0 ? (
-            <div className="selection-actions" aria-label="论文选择操作">
-              <button className="secondary-button" onClick={selectAllPapers} type="button">全选</button>
-              <button className="secondary-button" onClick={clearPaperSelection} type="button">清空选择</button>
+      {activeModule === 'reading' ? (
+        <section className="workspace" aria-label="Reading QA workspace">
+          <aside className="sidebar">
+            <div className="panel-header">
+              <h2>Papers</h2>
+              <span className="status-pill">{selectedReadingDocIds.length} selected</span>
             </div>
-          ) : null}
 
-          <ul className="paper-list">
-            {papers.map((paper) => (
-              <li key={paper.doc_id}>
-                <label className="paper-option">
-                  <input
-                    checked={selectedDocIds.includes(paper.doc_id)}
-                    onChange={(event) => handlePaperSelection(paper.doc_id, event.target.checked)}
-                    type="checkbox"
-                  />
-                  <span>
-                    <strong>{paper.title}</strong>
-                    <small>{paper.chunk_count} 个段落</small>
-                  </span>
-                </label>
-                <button className="remove-button" onClick={() => removePaper(paper.doc_id)} type="button" aria-label={`移除 ${paper.title}`}>
-                  移除
+            <label className="file-button full-width">
+              {isUploadingReadingPaper ? 'Uploading' : 'Upload PDFs'}
+              <input accept="application/pdf" disabled={isUploadingReadingPaper} multiple onChange={handleReadingUpload} type="file" />
+            </label>
+
+            {readingUploadError ? <p className="error-banner" role="alert">{readingUploadError}</p> : null}
+
+            <div className="selection-actions">
+              <button className="secondary-button" onClick={() => setSelectedReadingDocIds(readingPapers.map((paper) => paper.doc_id))} type="button">
+                Select all
+              </button>
+              <button className="secondary-button" onClick={() => setSelectedReadingDocIds([])} type="button">
+                Clear
+              </button>
+            </div>
+
+            <ul className="paper-list">
+              {readingPapers.map((paper) => (
+                <li className="paper-list-item" key={paper.doc_id}>
+                  <label className="paper-row">
+                    <input
+                      checked={selectedReadingDocIds.includes(paper.doc_id)}
+                      onChange={(event) => handleReadingPaperSelection(paper.doc_id, event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>
+                      <strong>{paper.title}</strong>
+                      <small>{paper.chunk_count} chunks</small>
+                    </span>
+                  </label>
+                  <button className="link-button" onClick={() => removeReadingPaper(paper.doc_id)} type="button">
+                    Remove
+                  </button>
+                  {paper.warnings.map((warning) => (
+                    <small className="paper-warning" key={warning}>{warning}</small>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          </aside>
+
+          <ReadingQA
+            error={qaError}
+            history={history}
+            isAsking={isAsking}
+            onAsk={handleAsk}
+            onClearHistory={() => setHistory([])}
+            onRestoreHistory={restoreHistoryItem}
+            paperCount={readingPapers.length}
+            question={question}
+            result={answer}
+            selectedPaperCount={selectedReadingDocIds.length}
+            setQuestion={setQuestion}
+          />
+        </section>
+      ) : (
+        <section className="workspace">
+          <aside className="sidebar" aria-label="Papers">
+            <div className="panel-header">
+              <h2>Papers</h2>
+              <div className="paper-actions">
+                <button className="secondary-button" type="button" onClick={() => void loadGapPapers()} disabled={isLoadingPapers}>
+                  {isLoadingPapers ? 'Loading' : 'Refresh'}
                 </button>
-                {paper.warnings.map((warning) => (
-                  <small className="paper-warning" key={warning}>{warning}</small>
-                ))}
-              </li>
-            ))}
-          </ul>
-        </aside>
+                <label className="file-button">
+                  {isUploadingGapPaper ? 'Uploading' : 'Upload PDF'}
+                  <input type="file" accept="application/pdf" onChange={(event) => void handleGapUpload(event.target.files)} />
+                </label>
+              </div>
+            </div>
+            <div className="paper-list">
+              {gapPapers.length === 0 ? (
+                <p className="muted">No papers uploaded yet.</p>
+              ) : (
+                gapPapers.map((paper) => (
+                  <label className="paper-row" key={paper.doc_id}>
+                    <input type="checkbox" checked={paper.selected} onChange={() => toggleGapPaper(paper.doc_id)} />
+                    <span>
+                      <strong>{paper.title}</strong>
+                      <small>{paper.chunk_count > 0 ? `${paper.chunk_count} chunks` : `created ${new Date(paper.created_at ?? '').toLocaleDateString()}`}</small>
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+          </aside>
 
-        <ReadingQA
-          error={qaError}
-          history={history}
-          isAsking={isAsking}
-          onAsk={handleAsk}
-          onClearHistory={clearHistory}
-          onRestoreHistory={restoreHistoryItem}
-          paperCount={papers.length}
-          question={question}
-          result={answer}
-          selectedPaperCount={selectedDocIds.length}
-          setQuestion={setQuestion}
-        />
-      </section>
+          <section className="analysis-panel" aria-label="Gap analysis">
+            <div className="analysis-form">
+              <div className="form-heading">
+                <label htmlFor="topic">Research topic</label>
+                <button className="secondary-button" type="button" onClick={() => void loadGapHistory()} disabled={isLoadingHistory}>
+                  {isLoadingHistory ? 'Loading' : 'History'}
+                </button>
+              </div>
+              <div className="topic-row">
+                <input
+                  id="topic"
+                  value={topic}
+                  onChange={(event) => setTopic(event.target.value)}
+                  placeholder="retrieval augmented generation robustness"
+                />
+                <button type="button" onClick={() => void handleAnalyze()} disabled={!canAnalyze}>
+                  {isAnalyzing ? 'Analyzing' : 'Analyze'}
+                </button>
+              </div>
+            </div>
+
+            {gapError ? <p className="error-banner">{gapError}</p> : null}
+            {gapWarnings.length > 0 ? (
+              <ul className="warning-list">
+                {gapWarnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            ) : null}
+
+            <GapList gaps={gaps} />
+          </section>
+        </section>
+      )}
     </main>
   );
 }

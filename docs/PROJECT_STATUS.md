@@ -1,6 +1,6 @@
 # CS Gap Assist Project Status
 
-Last updated: 2026-05-27
+Last updated: 2026-06-02
 
 ## Purpose
 
@@ -8,9 +8,11 @@ CS Gap Assist is a research gap analysis assistant for computer science papers. 
 
 ## Current Progress
 
-Overall first-version product progress: about 30%.
+Overall first-version product progress: about 38%.
 
 Foundation progress: about 70%.
+
+Research Gap branch MVP progress: 100% for isolated branch handoff.
 
 The project has a working repository foundation and one isolated branch per feature module. The current implementation is still an MVP scaffold: several external integrations use deterministic mock/fallback behavior so development can continue without API keys or quota.
 
@@ -25,6 +27,9 @@ The project has a working repository foundation and one isolated branch per feat
 - `codex/research-gap`
   - Research Gap analysis module.
   - Adds `/api/v1/gaps/analyze` with high/mid value gaps and evidence papers.
+  - Adds `/api/v1/gaps/history` for persisted gap history.
+  - Adds `/api/v1/papers` for persisted paper selection after page refresh.
+  - Includes a usable frontend Research Gap workbench with upload, paper selection, topic input, warnings, gap evidence, and history refresh.
 - `codex/experiment-suggest`
   - Experiment suggestion module.
   - Adds `/api/v1/experiments/suggest` with datasets, metrics, baselines, steps, risks, and 3-5 support papers.
@@ -46,6 +51,7 @@ The project has a working repository foundation and one isolated branch per feat
 - Frontend TypeScript uses strict mode and should not introduce `any`.
 - API keys must come from `.env`; do not hardcode keys.
 - Missing model keys should degrade to mock providers with explicit warnings.
+- Semantic Scholar is deprecated for this project and must not be used for new citation or literature retrieval work.
 
 ## Foundation Capabilities
 
@@ -70,6 +76,12 @@ The project has a working repository foundation and one isolated branch per feat
 - Default embedding model: `text-embedding-3-small`.
 - If `DEEPSEEK_API_KEY` or `OPENAI_API_KEY` is missing, the system should still run using mock providers and return warnings.
 
+## External Literature Policy
+
+- arXiv is the default external literature source and does not require an API key.
+- Semantic Scholar is deprecated and is not used by the Research Gap branch.
+- External literature failures degrade to deterministic fallback evidence with warnings.
+
 ## Storage Policy
 
 - SQLite stores paper metadata, gap history, experiment suggestions, favorite state, tags, and notes.
@@ -88,14 +100,14 @@ npm test --prefix frontend
 
 Current foundation verification at the time of this document:
 
-- Backend: `9 passed`
-- Frontend: `tsc --noEmit` passed
+- Backend on `codex/research-gap`: `16 passed`
+- Frontend on `codex/research-gap`: production build passes with `npm run build --prefix frontend`
 
 ## Known MVP Limitations
 
 - Module branches are isolated and have not yet been merged into one integrated application branch.
-- Semantic Scholar and arXiv behavior is mostly deterministic mock/fallback code.
-- The frontend is a skeleton, not a complete user workflow.
+- arXiv has live parsing plus deterministic fallback behavior; Semantic Scholar is deprecated and not used.
+- The Research Gap frontend is a usable MVP workflow; other feature branch frontends may still be skeletons.
 - RAG ranking is simple and designed for local development, not production retrieval quality.
 - DeepSeek and OpenAI real calls need real API keys and further integration testing.
 - Chroma is optional in tests; the memory mirror preserves local behavior.

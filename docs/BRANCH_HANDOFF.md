@@ -1,6 +1,6 @@
 # Branch Handoff Guide
 
-Last updated: 2026-05-27
+Last updated: 2026-06-02
 
 ## How To Use This File
 
@@ -100,33 +100,58 @@ npm run build --prefix frontend
 
 Goal: Research Gap analysis from a topic and uploaded papers.
 
+Current status: isolated branch MVP complete.
+
+Key commits after foundation merge:
+
+- `90e130e Merge branch 'codex/foundation' into codex/research-gap`
+- `b42965b feat: advance research gap workflow`
+- `8053e0b feat: add research gap history`
+- `108b6e8 feat: load persisted papers`
+- `9dcacd8 chore: disable semantic scholar by default`
+
 Implemented:
 
 - `/api/v1/gaps/analyze`
 - Returns `gaps` with `gap_id`, `title`, `value_level`, `description`, `evidence_papers`, and `created_at`.
-- Mock Semantic Scholar and arXiv search clients.
+- `/api/v1/gaps/history`
+- `/api/v1/papers`
+- Real arXiv Atom response parsing with deterministic fallback.
+- Semantic Scholar is deprecated and is no longer present in the Research Gap backend.
+- Model JSON repair and validation for fenced/prose-wrapped JSON, unsupported `value_level`, missing evidence, and malformed items.
 - Persists gaps in SQLite.
-- Basic frontend component: `frontend/src/components/GapAnalysis/GapList.tsx`.
+- Usable frontend Research Gap workbench:
+  - Upload PDF.
+  - Refresh persisted papers.
+  - Select uploaded papers.
+  - Enter topic.
+  - Run analysis.
+  - Display warnings, high/mid gaps, evidence papers, and persisted gap history.
 
 Known limitations:
 
-- Depends on branch-local version of foundation before `ffa00fe`; merge latest `codex/foundation` before continuing.
-- External literature retrieval is mocked.
-- Gap ranking and evidence quality need real model/retrieval evaluation.
+- Branch is still isolated and has not been merged into an integration branch.
+- arXiv can fail in restricted or offline networks; deterministic fallback keeps the workflow usable.
+- DeepSeek/OpenAI real behavior needs API keys and quality evaluation.
+- Gap ranking and evidence quality are MVP-level and should be evaluated against real papers before production use.
 
 Next steps:
 
-- Merge latest `codex/foundation`.
-- Replace mock external search with real Semantic Scholar/arXiv clients.
-- Add frontend topic input and uploaded-paper selector.
-- Add schema repair/validation around model JSON output.
+- Create or update an integration branch when combining feature modules.
+- Run real-key evaluation with `DEEPSEEK_API_KEY` and `OPENAI_API_KEY`.
+- Add browser-level QA when a browser automation dependency is available.
 
 Verification on branch:
 
 ```powershell
-python -m pytest backend/tests/test_foundation.py backend/tests/test_research_gap.py -q
-npm test --prefix frontend
+python -m pytest backend/tests -q
+npm run build --prefix frontend
 ```
+
+Expected baseline:
+
+- Backend: `16 passed`
+- Frontend: production build succeeds.
 
 ## codex/experiment-suggest
 
@@ -179,7 +204,7 @@ Known limitations:
 Next steps:
 
 - Merge latest `codex/foundation`.
-- Add real citation expansion through Semantic Scholar when available.
+- Add real citation expansion through non-Semantic-Scholar providers when available.
 - Add graph size caps and key-node scoring policy.
 - Add keyword search UI.
 

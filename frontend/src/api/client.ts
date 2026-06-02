@@ -1,4 +1,4 @@
-import type { GapAnalysisResponse, ModelConfig, PaperUploadResponse } from '../types';
+import type { CitationGraphResponse, GapAnalysisResponse, ModelConfig, PaperUploadResponse } from '../types';
 
 const API_PREFIX = '/api/v1';
 
@@ -25,4 +25,9 @@ export async function analyzeGaps(topic: string, docIds: string[], modelConfig?:
       body: JSON.stringify({ topic, doc_ids: docIds, model_config: modelConfig }),
     }),
   );
+}
+
+export async function fetchCitationGraph(keyword: string, maxNodes: number): Promise<CitationGraphResponse> {
+  const params = new URLSearchParams({ keyword, max_nodes: String(maxNodes) });
+  return parseResponse<CitationGraphResponse>(await fetch(`${API_PREFIX}/citations/graph?${params.toString()}`));
 }

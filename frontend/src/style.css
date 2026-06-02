@@ -1,14 +1,213 @@
 :root {
-  font-family: Georgia, "Times New Roman", serif;
-  color: #17211b;
-  background: radial-gradient(circle at top left, #f3ead2, transparent 32rem), #f7f4ea;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #17212b;
+  background: #f4f6f8;
 }
 
-body { margin: 0; }
-.shell { max-width: 1120px; margin: 0 auto; padding: 64px 24px; }
-.hero { border: 1px solid #d6c8a5; border-radius: 32px; padding: 48px; background: rgba(255,255,255,0.62); box-shadow: 0 24px 80px rgba(53, 45, 20, 0.12); }
-.eyebrow { letter-spacing: .18em; text-transform: uppercase; color: #807042; font-size: 13px; }
-h1 { font-size: clamp(36px, 6vw, 76px); line-height: .95; max-width: 880px; }
-.hero p:last-child { max-width: 700px; font-size: 20px; line-height: 1.7; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin-top: 24px; }
-.card { min-height: 120px; border-radius: 24px; padding: 22px; background: #1d3328; color: #f7f4ea; display: flex; align-items: flex-end; font-size: 20px; }
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.workspace {
+  min-height: 100vh;
+  padding: 28px;
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(320px, 720px);
+  gap: 24px;
+  align-items: end;
+  max-width: 1280px;
+  margin: 0 auto 16px;
+}
+
+.app-label {
+  margin: 0 0 8px;
+  color: #536477;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 0;
+  font-size: 30px;
+  line-height: 1.15;
+}
+
+h2 {
+  margin-bottom: 12px;
+  font-size: 16px;
+}
+
+.search-form {
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) 140px 132px;
+  gap: 12px;
+  align-items: end;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: #536477;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+input,
+select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #c7d0da;
+  border-radius: 8px;
+  padding: 0 12px;
+  color: #17212b;
+  background: #ffffff;
+}
+
+button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 16px;
+  color: #ffffff;
+  background: #245b73;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.alert {
+  max-width: 1280px;
+  margin: 0 auto 10px;
+  border-left: 4px solid #c08a28;
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #5c4216;
+  background: #fff4da;
+}
+
+.alert.error {
+  border-left-color: #bf3f3f;
+  color: #7b2424;
+  background: #ffe6e3;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.graph-panel,
+.summary-panel {
+  border: 1px solid #d9e0e7;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.graph-panel {
+  min-height: 520px;
+  overflow: hidden;
+}
+
+.citation-graph {
+  display: block;
+  width: 100%;
+  min-height: 520px;
+}
+
+.loading-state {
+  display: grid;
+  min-height: 520px;
+  place-items: center;
+  color: #536477;
+  font-weight: 700;
+}
+
+.summary-panel {
+  padding: 18px;
+}
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  border-bottom: 1px solid #edf0f3;
+  color: #536477;
+}
+
+.stat-row strong {
+  color: #17212b;
+  font-size: 22px;
+}
+
+.key-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.key-list li {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e1e7ed;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fbfcfd;
+}
+
+.key-list strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.key-list span {
+  color: #536477;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .workspace {
+    padding: 18px;
+  }
+
+  .toolbar,
+  .content-grid,
+  .search-form {
+    grid-template-columns: 1fr;
+  }
+
+  .graph-panel,
+  .citation-graph,
+  .loading-state {
+    min-height: 380px;
+  }
+}

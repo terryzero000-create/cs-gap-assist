@@ -81,3 +81,23 @@ export interface ExperimentSuggestResponse {
   experiments: ExperimentPlan[];
   warnings: string[];
 }
+
+export interface CitationNode {
+  id: string;
+  title: string;
+  year: number | null;
+  importance_score: number;
+  is_key: boolean;
+}
+
+export interface CitationLink {
+  source: string;
+  target: string;
+  relation: string;
+}
+
+export interface CitationGraphResponse {
+  nodes: CitationNode[];
+  links: CitationLink[];
+  warnings: string[];
+}

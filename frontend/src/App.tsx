@@ -3,17 +3,20 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   analyzeGaps,
   askPaper,
+  fetchCitationGraph,
   listExperimentHistory,
   listGapHistory,
   listPapers,
   suggestExperiments,
   uploadPaper,
 } from './api/client';
+import { CitationForceGraph } from './components/CitationGraph/CitationForceGraph';
 import { ExperimentPlanCard } from './components/ExperimentSuggest/ExperimentPlanCard';
 import { GapList } from './components/GapAnalysis/GapList';
 import { ReadingQA } from './components/PaperUpload/ReadingQA';
 import './style.css';
 import type {
+  CitationGraphResponse,
   ExperimentPlan,
   GapItem,
   PaperUploadResponse,
@@ -21,7 +24,7 @@ import type {
   ReadingQAResponse,
 } from './types';
 
-type ModuleKey = 'reading' | 'gaps' | 'experiments';
+type ModuleKey = 'reading' | 'gaps' | 'experiments' | 'citations';
 
 interface UploadedPaper extends PaperUploadResponse {
   selected: boolean;
@@ -29,11 +32,13 @@ interface UploadedPaper extends PaperUploadResponse {
 }
 
 const historyStorageKey = 'cs-gap-assist-reading-qa-history';
+const citationNodeLimits = [8, 15, 25, 40];
 
 const modules: { key: ModuleKey; label: string }[] = [
   { key: 'reading', label: 'Reading QA' },
   { key: 'gaps', label: 'Research Gap' },
   { key: 'experiments', label: 'Experiment Suggest' },
+  { key: 'citations', label: 'Citation Graph' },
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -97,11 +102,21 @@ export function App() {
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
 
+  const [citationKeyword, setCitationKeyword] = useState('retrieval augmented generation');
+  const [citationMaxNodes, setCitationMaxNodes] = useState(15);
+  const [citationGraph, setCitationGraph] = useState<CitationGraphResponse | null>(null);
+  const [citationError, setCitationError] = useState<string | null>(null);
+  const [isLoadingCitationGraph, setIsLoadingCitationGraph] = useState(false);
+
   const selectedGapDocIds = useMemo(() => gapPapers.filter((paper) => paper.selected).map((paper) => paper.doc_id), [gapPapers]);
   const canAnalyze = topic.trim().length > 0 && selectedGapDocIds.length > 0 && !isAnalyzing;
   const selectedGap = useMemo(() => gaps.find((gap) => gap.gap_id === selectedGapId), [gaps, selectedGapId]);
   const activeGapId = selectedGap?.gap_id ?? manualGapId.trim();
   const canSuggest = activeGapId.length > 0 && !isSuggesting;
+  const keyCitationNodes = useMemo(
+    () => (citationGraph?.nodes ?? []).filter((node) => node.is_key).slice(0, 5),
+    [citationGraph],
+  );
 
   useEffect(() => {
     window.localStorage.setItem(historyStorageKey, JSON.stringify(history));
@@ -301,6 +316,24 @@ export function App() {
     setManualGapId(value);
     if (value.trim()) {
       setSelectedGapId('');
+    }
+  }
+
+  async function handleCitationSearch(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const keyword = citationKeyword.trim();
+    if (!keyword) {
+      setCitationError('Enter a technical keyword.');
+      return;
+    }
+    setIsLoadingCitationGraph(true);
+    setCitationError(null);
+    try {
+      setCitationGraph(await fetchCitationGraph(keyword, citationMaxNodes));
+    } catch (caught) {
+      setCitationError(caught instanceof Error ? caught.message : 'Could not load citation graph');
+    } finally {
+      setIsLoadingCitationGraph(false);
     }
   }
 
@@ -528,6 +561,64 @@ export function App() {
               ) : (
                 plans.map((plan) => <ExperimentPlanCard key={plan.experiment_id} plan={plan} />)
               )}
+            </div>
+          </section>
+        </section>
+      ) : null}
+
+      {activeModule === 'citations' ? (
+        <section className="citation-workspace" aria-label="Citation graph">
+          <section className="analysis-panel">
+            <form className="citation-toolbar" onSubmit={(event) => void handleCitationSearch(event)}>
+              <label>
+                Keyword
+                <input
+                  value={citationKeyword}
+                  onChange={(event) => setCitationKeyword(event.target.value)}
+                  placeholder="graph neural networks"
+                />
+              </label>
+              <label>
+                Node cap
+                <select value={citationMaxNodes} onChange={(event) => setCitationMaxNodes(Number(event.target.value))}>
+                  {citationNodeLimits.map((limit) => (
+                    <option value={limit} key={limit}>{limit} nodes</option>
+                  ))}
+                </select>
+              </label>
+              <button type="submit" disabled={isLoadingCitationGraph}>{isLoadingCitationGraph ? 'Loading' : 'Build graph'}</button>
+            </form>
+            {citationError ? <p className="error-banner">{citationError}</p> : null}
+            {citationGraph?.warnings.map((warning) => (
+              <p className="warning" key={warning}>{warning}</p>
+            ))}
+            <div className="citation-grid">
+              <div className="graph-panel" aria-busy={isLoadingCitationGraph}>
+                {isLoadingCitationGraph ? (
+                  <div className="loading-state">Loading citation graph...</div>
+                ) : (
+                  <CitationForceGraph nodes={citationGraph?.nodes ?? []} links={citationGraph?.links ?? []} />
+                )}
+              </div>
+              <aside className="summary-panel">
+                <div className="stat-row">
+                  <span>Nodes</span>
+                  <strong>{citationGraph?.nodes.length ?? 0}</strong>
+                </div>
+                <div className="stat-row">
+                  <span>Links</span>
+                  <strong>{citationGraph?.links.length ?? 0}</strong>
+                </div>
+                <h2>Key papers</h2>
+                <ul className="key-list">
+                  {keyCitationNodes.map((node) => (
+                    <li key={node.id}>
+                      <strong>{node.title}</strong>
+                      <span>{node.year ?? 'Year unknown'} · score {node.importance_score.toFixed(2)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </aside>
             </div>
           </section>
         </section>

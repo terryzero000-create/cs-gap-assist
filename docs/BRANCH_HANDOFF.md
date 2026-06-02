@@ -38,6 +38,7 @@ Implemented:
 - DeepSeek chat provider abstraction with mock fallback.
 - OpenAI embedding provider abstraction with mock fallback.
 - React/Vite/TypeScript frontend skeleton and typed API client.
+- Project-level external literature policy: Semantic Scholar is deprecated and must not be used for new work.
 
 Next steps:
 
@@ -213,32 +214,45 @@ npm run build --prefix frontend
 
 Goal: visualize citation evolution for a technical keyword.
 
+Current status: isolated branch MVP complete.
+
 Implemented:
 
-- `/api/v1/citations/graph?keyword=...`
+- `/api/v1/citations/graph?keyword=...&max_nodes=...`
 - Returns D3-compatible `nodes` and `links`.
 - Marks key nodes with `importance_score` and `is_key`.
-- Basic D3 force graph component: `frontend/src/components/CitationGraph/CitationForceGraph.tsx`.
+- Merged latest `codex/foundation`.
+- Optional OpenAlex citation expansion behind `ENABLE_OPENALEX=true` plus `OPENALEX_API_KEY`.
+- Deterministic local fallback graph with explicit warnings when OpenAlex is disabled, missing a key, or unavailable.
+- Graph size caps and key-node scoring policy.
+- Keyword search UI with loading state, node cap control, warnings, graph view, and key-paper summary.
+- D3 force graph component: `frontend/src/components/CitationGraph/CitationForceGraph.tsx`.
 
 Known limitations:
 
-- Depends on branch-local version of foundation before `ffa00fe`; merge latest `codex/foundation` before continuing.
-- Graph data is deterministic MVP data, not real citation API data.
-- Frontend graph lacks controls, loading state, and large-graph handling.
+- OpenAlex is optional, disabled by default for local development, and requires `OPENALEX_API_KEY` when enabled.
+- Citation expansion quality depends on OpenAlex work search and lightweight citation neighbor retrieval.
+- The branch is still isolated and has not been merged into an integration branch.
 
 Next steps:
 
-- Merge latest `codex/foundation`.
-- Add real citation expansion through non-Semantic-Scholar providers when available.
-- Add graph size caps and key-node scoring policy.
-- Add keyword search UI.
+- Add browser-level QA against a running frontend/backend pair.
+- Add richer graph filters such as year range and key-only view.
+- Consider caching OpenAlex responses in SQLite after integration.
 
 Verification on branch:
 
 ```powershell
-python -m pytest backend/tests/test_foundation.py backend/tests/test_citation_graph.py -q
+python -m pytest backend/tests -q
 npm test --prefix frontend
+npm run build --prefix frontend
 ```
+
+Current branch verification:
+
+- Backend: `13 passed`
+- Frontend: `tsc --noEmit` passed
+- Frontend build passed
 
 ## codex/knowledge-base
 

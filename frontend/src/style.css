@@ -14,6 +14,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -89,7 +90,9 @@ h4 {
 .form-actions,
 .answer-actions,
 .history-heading-actions,
-.plan-toolbar {
+.plan-toolbar,
+.citation-toolbar,
+.stat-row {
   align-items: center;
   display: flex;
   gap: 8px;
@@ -110,13 +113,21 @@ h4 {
   color: #ffffff;
 }
 
-.workspace {
+.workspace,
+.citation-workspace {
   align-items: start;
   display: grid;
   gap: 18px;
-  grid-template-columns: 320px minmax(0, 1fr);
   margin: 0 auto;
   max-width: 1180px;
+}
+
+.workspace {
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
+.citation-workspace {
+  grid-template-columns: 1fr;
 }
 
 .sidebar,
@@ -126,7 +137,9 @@ h4 {
 .history-panel,
 .template-panel,
 .selected-gap,
-.plan-card {
+.plan-card,
+.graph-panel,
+.summary-panel {
   background: #ffffff;
   border: 1px solid #d9e0e6;
   border-radius: 8px;
@@ -150,7 +163,8 @@ h4 {
 .answer-panel,
 .history-panel,
 .template-panel,
-.selected-gap {
+.selected-gap,
+.summary-panel {
   padding: 16px;
 }
 
@@ -228,7 +242,8 @@ h4 {
 .source-list,
 .history-list,
 .plans,
-.gap-list.compact {
+.gap-list.compact,
+.key-list {
   display: grid;
   gap: 8px;
   list-style: none;
@@ -236,7 +251,8 @@ h4 {
   padding: 12px;
 }
 
-.plans {
+.plans,
+.key-list {
   padding: 0;
 }
 
@@ -266,7 +282,9 @@ h4 {
 .paper-row strong,
 .paper-row small,
 .gap-row strong,
-.gap-row small {
+.gap-row small,
+.key-list strong,
+.key-list span {
   display: block;
 }
 
@@ -274,7 +292,8 @@ h4 {
 .gap-item strong,
 .history-question,
 .gap-row strong,
-.gap-row small {
+.gap-row small,
+.key-list strong {
   overflow-wrap: anywhere;
 }
 
@@ -285,7 +304,8 @@ h4 {
 .history-meta,
 .form-actions,
 .section-heading span,
-.plan-toolbar {
+.plan-toolbar,
+.key-list span {
   color: #607080;
 }
 
@@ -324,14 +344,17 @@ h4 {
 .question-form label,
 .analysis-form label,
 .suggest-form label,
-.manual-gap label {
+.manual-gap label,
+.citation-toolbar label {
   color: #263442;
   font-weight: 700;
 }
 
 textarea,
 .topic-row input,
-.manual-gap input {
+.manual-gap input,
+.citation-toolbar input,
+.citation-toolbar select {
   border: 1px solid #b8c4ce;
   border-radius: 6px;
   color: #17202a;
@@ -567,6 +590,56 @@ textarea {
   padding: 6px 8px;
 }
 
+.citation-toolbar {
+  align-items: end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px auto;
+}
+
+.citation-toolbar label {
+  display: grid;
+  gap: 8px;
+}
+
+.citation-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) 260px;
+}
+
+.graph-panel {
+  min-height: 480px;
+  overflow: hidden;
+}
+
+.citation-graph {
+  display: block;
+  height: 100%;
+  min-height: 460px;
+  width: 100%;
+}
+
+.loading-state {
+  color: #607080;
+  display: grid;
+  min-height: 460px;
+  place-items: center;
+}
+
+.summary-panel {
+  align-self: start;
+  display: grid;
+  gap: 14px;
+}
+
+.stat-row {
+  justify-content: space-between;
+}
+
+.stat-row strong {
+  font-size: 24px;
+}
+
 @media (max-width: 820px) {
   .app-shell {
     padding: 18px;
@@ -580,13 +653,16 @@ textarea {
 
   .workspace,
   .topic-row,
-  .plan-grid {
+  .plan-grid,
+  .citation-toolbar,
+  .citation-grid {
     grid-template-columns: 1fr;
   }
 
   .topic-row button,
   .form-actions button,
-  .suggest-form button {
+  .suggest-form button,
+  .citation-toolbar button {
     width: 100%;
   }
 }

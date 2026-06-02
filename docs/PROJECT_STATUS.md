@@ -16,6 +16,8 @@ Research Gap branch MVP progress: 100% for isolated branch handoff.
 
 Experiment Suggestion branch MVP progress: 100% for isolated branch handoff.
 
+Citation Graph branch MVP progress: 100% for isolated branch handoff.
+
 The project has a working repository foundation and one isolated branch per feature module. The current implementation is still an MVP scaffold: several external integrations use deterministic mock/fallback behavior so development can continue without API keys or quota.
 
 ## Branch Structure
@@ -41,7 +43,7 @@ The project has a working repository foundation and one isolated branch per feat
   - Repairs fenced/prose-wrapped or invalid model JSON and falls back to deterministic experiment plans when needed.
 - `codex/citation-graph`
   - Citation evolution graph module.
-  - Adds `/api/v1/citations/graph` with D3-ready `nodes` and `links`.
+  - Adds `/api/v1/citations/graph` with D3-ready `nodes` and `links`, node caps, key-node scoring, optional OpenAlex expansion, and a usable keyword search UI.
 - `codex/knowledge-base`
   - Personal knowledge base module.
   - Adds paper listing, note creation/listing, and unified search.
@@ -87,6 +89,9 @@ The project has a working repository foundation and one isolated branch per feat
 - arXiv is the default external literature source and does not require an API key.
 - Semantic Scholar is deprecated and is not used by the Research Gap or Experiment Suggestion branches.
 - External literature failures degrade to deterministic fallback evidence with warnings.
+- Citation graph expansion should use OpenAlex only when explicitly enabled with `ENABLE_OPENALEX=true` and configured with `OPENALEX_API_KEY`.
+- OpenAlex must remain optional; missing API key, missing network access, empty results, or API failures should return explicit warnings and deterministic fallback graph data.
+- arXiv may still be used by branches that already depend on it, with deterministic fallback behavior for local development.
 
 ## Storage Policy
 
@@ -113,7 +118,8 @@ Current foundation verification at the time of this document:
 
 - Module branches are isolated and have not yet been merged into one integrated application branch.
 - Some external literature behavior still uses deterministic fallback when live services are unavailable.
-- The Research Gap and Experiment Suggestion branches have usable MVP workflows; other feature branch frontends may still be skeletons.
+- OpenAlex and arXiv behavior is optional and mostly deterministic mock/fallback code.
+- The Research Gap, Experiment Suggestion, and Citation Graph branches have usable MVP workflows; other feature branch frontends may still be skeletons.
 - RAG ranking is simple and designed for local development, not production retrieval quality.
 - DeepSeek and OpenAI real calls need real API keys and further integration testing.
 - Chroma is optional in tests; the memory mirror preserves local behavior.

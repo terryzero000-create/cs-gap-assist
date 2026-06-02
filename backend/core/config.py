@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     default_embedding_provider: str = "openai"
     default_embedding_model: str = "text-embedding-3-small"
+    enable_semantic_scholar: bool = False
     semantic_scholar_api_key: str | None = None
     external_search_timeout_seconds: float = 3.0
 

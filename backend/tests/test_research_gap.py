@@ -112,6 +112,23 @@ def test_arxiv_client_parses_atom_response_shape() -> None:
     assert papers[0].year == 2025
 
 
+def test_gap_analysis_skips_semantic_scholar_by_default(monkeypatch, tmp_path) -> None:
+    class BlockingSemanticScholarClient:
+        def __init__(self, *args, **kwargs) -> None:
+            raise AssertionError("Semantic Scholar should be disabled by default.")
+
+    monkeypatch.setattr(gap_chain, "SemanticScholarClient", BlockingSemanticScholarClient)
+
+    response = asyncio.run(
+        gap_chain.analyze_research_gaps(
+            GapAnalysisRequest(topic="rag robustness", doc_ids=[]),
+            Settings(sqlite_url=f"sqlite:///{tmp_path / 'gap.db'}", external_search_timeout_seconds=0.01),
+        )
+    )
+
+    assert response.gaps
+
+
 def test_gap_analysis_repairs_fenced_json_and_normalizes_values(monkeypatch, tmp_path) -> None:
     class FencedJsonProvider:
         async def generate(self, prompt: str, model: str | None = None) -> tuple[str, list[str]]:

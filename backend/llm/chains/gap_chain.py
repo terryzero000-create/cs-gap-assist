@@ -13,10 +13,13 @@ from backend.services.semantic_scholar import ExternalPaper, SemanticScholarClie
 
 async def analyze_research_gaps(request: GapAnalysisRequest, settings: Settings) -> GapAnalysisResponse:
     """Analyze research gaps from local papers and external literature evidence."""
-    semantic_papers, semantic_warnings = await SemanticScholarClient(
-        api_key=settings.semantic_scholar_api_key,
-        timeout_seconds=settings.external_search_timeout_seconds,
-    ).search(request.topic, limit=3)
+    semantic_papers: list[ExternalPaper] = []
+    semantic_warnings: list[str] = []
+    if settings.enable_semantic_scholar:
+        semantic_papers, semantic_warnings = await SemanticScholarClient(
+            api_key=settings.semantic_scholar_api_key,
+            timeout_seconds=settings.external_search_timeout_seconds,
+        ).search(request.topic, limit=3)
     arxiv_papers, arxiv_warnings = await ArxivSearchClient(timeout_seconds=settings.external_search_timeout_seconds).search(
         request.topic,
         limit=2,

@@ -1,4 +1,13 @@
-import type { GapAnalysisResponse, ModelConfig, PaperUploadResponse } from '../types';
+import type {
+  GapAnalysisResponse,
+  KnowledgeSearchResponse,
+  ModelConfig,
+  NoteCreateRequest,
+  NoteRecord,
+  PaperCollectionUpdateRequest,
+  PaperRecord,
+  PaperUploadResponse,
+} from '../types';
 
 const API_PREFIX = '/api/v1';
 
@@ -25,4 +34,47 @@ export async function analyzeGaps(topic: string, docIds: string[], modelConfig?:
       body: JSON.stringify({ topic, doc_ids: docIds, model_config: modelConfig }),
     }),
   );
+}
+
+export async function listKnowledgePapers(tag?: string, favoritesOnly = false): Promise<PaperRecord[]> {
+  const params = new URLSearchParams();
+  if (tag) {
+    params.set('tag', tag);
+  }
+  if (favoritesOnly) {
+    params.set('favorites_only', 'true');
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  return parseResponse<PaperRecord[]>(await fetch(`${API_PREFIX}/knowledge/papers${suffix}`));
+}
+
+export async function updateKnowledgePaper(docId: string, request: PaperCollectionUpdateRequest): Promise<PaperRecord> {
+  return parseResponse<PaperRecord>(
+    await fetch(`${API_PREFIX}/knowledge/papers/${docId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    }),
+  );
+}
+
+export async function createKnowledgeNote(request: NoteCreateRequest): Promise<NoteRecord> {
+  return parseResponse<NoteRecord>(
+    await fetch(`${API_PREFIX}/knowledge/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    }),
+  );
+}
+
+export async function searchKnowledge(query: string, tag?: string, favoritesOnly = false): Promise<KnowledgeSearchResponse> {
+  const params = new URLSearchParams({ query });
+  if (tag) {
+    params.set('tag', tag);
+  }
+  if (favoritesOnly) {
+    params.set('favorites_only', 'true');
+  }
+  return parseResponse<KnowledgeSearchResponse>(await fetch(`${API_PREFIX}/knowledge/search?${params.toString()}`));
 }

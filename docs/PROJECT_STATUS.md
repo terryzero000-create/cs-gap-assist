@@ -1,6 +1,6 @@
 # CS Gap Assist Project Status
 
-Last updated: 2026-05-27
+Last updated: 2026-06-02
 
 ## Purpose
 
@@ -8,9 +8,11 @@ CS Gap Assist is a research gap analysis assistant for computer science papers. 
 
 ## Current Progress
 
-Overall first-version product progress: about 30%.
+Overall first-version product progress: about 35%.
 
 Foundation progress: about 70%.
+
+Knowledge Base branch MVP progress: 100% for isolated branch handoff.
 
 The project has a working repository foundation and one isolated branch per feature module. The current implementation is still an MVP scaffold: several external integrations use deterministic mock/fallback behavior so development can continue without API keys or quota.
 
@@ -33,7 +35,8 @@ The project has a working repository foundation and one isolated branch per feat
   - Adds `/api/v1/citations/graph` with D3-ready `nodes` and `links`.
 - `codex/knowledge-base`
   - Personal knowledge base module.
-  - Adds paper listing, note creation/listing, and unified search.
+  - Adds paper listing, note creation/listing, tag/favorite updates, and unified search across papers, notes, chunks, Gap history, and experiment history.
+  - Adds a usable frontend knowledge-base workbench with upload, search, filters, note creation, tag editing, and favorite toggling.
 
 ## Shared Contracts
 
@@ -95,7 +98,7 @@ Current foundation verification at the time of this document:
 
 - Module branches are isolated and have not yet been merged into one integrated application branch.
 - Semantic Scholar and arXiv behavior is mostly deterministic mock/fallback code.
-- The frontend is a skeleton, not a complete user workflow.
+- The Knowledge Base branch has a usable MVP workflow; other feature branch frontends may still be skeletons.
 - RAG ranking is simple and designed for local development, not production retrieval quality.
 - DeepSeek and OpenAI real calls need real API keys and further integration testing.
 - Chroma is optional in tests; the memory mirror preserves local behavior.

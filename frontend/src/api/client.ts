@@ -1,4 +1,5 @@
 import type {
+  ExperimentSuggestResponse,
   GapAnalysisResponse,
   ModelConfig,
   PaperListResponse,
@@ -49,4 +50,19 @@ export async function askPaper(question: string, docIds: string[], modelConfig?:
 
 export async function listGapHistory(): Promise<GapAnalysisResponse> {
   return parseResponse<GapAnalysisResponse>(await fetch(`${API_PREFIX}/gaps/history`));
+}
+
+export async function listExperimentHistory(gapId?: string): Promise<ExperimentSuggestResponse> {
+  const params = gapId ? `?gap_id=${encodeURIComponent(gapId)}` : '';
+  return parseResponse<ExperimentSuggestResponse>(await fetch(`${API_PREFIX}/experiments/history${params}`));
+}
+
+export async function suggestExperiments(gapId: string, topic?: string, modelConfig?: ModelConfig): Promise<ExperimentSuggestResponse> {
+  return parseResponse<ExperimentSuggestResponse>(
+    await fetch(`${API_PREFIX}/experiments/suggest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gap_id: gapId, topic, model_config: modelConfig }),
+    }),
+  );
 }

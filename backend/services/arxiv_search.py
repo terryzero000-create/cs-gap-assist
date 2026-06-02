@@ -72,7 +72,7 @@ class ArxivSearchClient:
 
     def _fallback(self, query: str, limit: int) -> list[ExternalPaper]:
         """Return deterministic local papers when live search is unavailable."""
-        papers = [
+        return [
             ExternalPaper(
                 paper_id=f"arxiv-{index}",
                 title=f"arXiv study on {query} #{index}",
@@ -81,4 +81,3 @@ class ArxivSearchClient:
             )
             for index in range(1, limit + 1)
         ]
-        return papers

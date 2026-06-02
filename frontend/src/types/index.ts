@@ -64,3 +64,20 @@ export interface ReadingQAHistoryItem {
   createdAt: string;
   result: ReadingQAResponse;
 }
+
+export interface ExperimentPlan {
+  experiment_id: string;
+  gap_id: string;
+  objective: string;
+  datasets: string[];
+  metrics: string[];
+  baselines: string[];
+  steps: string[];
+  risks: string[];
+  support_papers: string[];
+}
+
+export interface ExperimentSuggestResponse {
+  experiments: ExperimentPlan[];
+  warnings: string[];
+}

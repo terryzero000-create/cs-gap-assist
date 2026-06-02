@@ -1,12 +1,27 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 
-import { analyzeGaps, askPaper, listGapHistory, listPapers, uploadPaper } from './api/client';
+import {
+  analyzeGaps,
+  askPaper,
+  listExperimentHistory,
+  listGapHistory,
+  listPapers,
+  suggestExperiments,
+  uploadPaper,
+} from './api/client';
+import { ExperimentPlanCard } from './components/ExperimentSuggest/ExperimentPlanCard';
 import { GapList } from './components/GapAnalysis/GapList';
 import { ReadingQA } from './components/PaperUpload/ReadingQA';
 import './style.css';
-import type { GapItem, PaperUploadResponse, ReadingQAHistoryItem, ReadingQAResponse } from './types';
+import type {
+  ExperimentPlan,
+  GapItem,
+  PaperUploadResponse,
+  ReadingQAHistoryItem,
+  ReadingQAResponse,
+} from './types';
 
-type ModuleKey = 'reading' | 'gaps';
+type ModuleKey = 'reading' | 'gaps' | 'experiments';
 
 interface UploadedPaper extends PaperUploadResponse {
   selected: boolean;
@@ -18,6 +33,7 @@ const historyStorageKey = 'cs-gap-assist-reading-qa-history';
 const modules: { key: ModuleKey; label: string }[] = [
   { key: 'reading', label: 'Reading QA' },
   { key: 'gaps', label: 'Research Gap' },
+  { key: 'experiments', label: 'Experiment Suggest' },
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -69,11 +85,23 @@ export function App() {
   const [isUploadingGapPaper, setIsUploadingGapPaper] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isLoadingPapers, setIsLoadingPapers] = useState(false);
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [isLoadingGapHistory, setIsLoadingGapHistory] = useState(false);
   const [gapError, setGapError] = useState<string | null>(null);
+
+  const [selectedGapId, setSelectedGapId] = useState('');
+  const [manualGapId, setManualGapId] = useState('');
+  const [experimentTopic, setExperimentTopic] = useState('');
+  const [plans, setPlans] = useState<ExperimentPlan[]>([]);
+  const [experimentWarnings, setExperimentWarnings] = useState<string[]>([]);
+  const [experimentError, setExperimentError] = useState<string | null>(null);
+  const [isLoadingPlans, setIsLoadingPlans] = useState(false);
+  const [isSuggesting, setIsSuggesting] = useState(false);
 
   const selectedGapDocIds = useMemo(() => gapPapers.filter((paper) => paper.selected).map((paper) => paper.doc_id), [gapPapers]);
   const canAnalyze = topic.trim().length > 0 && selectedGapDocIds.length > 0 && !isAnalyzing;
+  const selectedGap = useMemo(() => gaps.find((gap) => gap.gap_id === selectedGapId), [gaps, selectedGapId]);
+  const activeGapId = selectedGap?.gap_id ?? manualGapId.trim();
+  const canSuggest = activeGapId.length > 0 && !isSuggesting;
 
   useEffect(() => {
     window.localStorage.setItem(historyStorageKey, JSON.stringify(history));
@@ -84,12 +112,19 @@ export function App() {
     void loadGapHistory();
   }, []);
 
+  useEffect(() => {
+    if (activeGapId) {
+      void loadPlans(activeGapId);
+    } else {
+      setPlans([]);
+    }
+  }, [activeGapId]);
+
   async function handleReadingUpload(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     if (files.length === 0) {
       return;
     }
-
     setIsUploadingReadingPaper(true);
     setReadingUploadError(null);
     try {
@@ -110,7 +145,6 @@ export function App() {
     if (!trimmedQuestion || selectedReadingDocIds.length === 0) {
       return;
     }
-
     setIsAsking(true);
     setQaError(null);
     try {
@@ -175,6 +209,7 @@ export function App() {
     try {
       const result = await analyzeGaps(topic.trim(), selectedGapDocIds);
       setGaps(result.gaps);
+      setSelectedGapId((current) => current || result.gaps[0]?.gap_id || '');
       setGapWarnings(result.warnings);
     } catch (caught) {
       setGapError(caught instanceof Error ? caught.message : 'Analysis failed');
@@ -184,16 +219,17 @@ export function App() {
   }
 
   async function loadGapHistory(): Promise<void> {
-    setIsLoadingHistory(true);
+    setIsLoadingGapHistory(true);
     setGapError(null);
     try {
       const result = await listGapHistory();
       setGaps(result.gaps);
+      setSelectedGapId((current) => current || result.gaps[0]?.gap_id || '');
       setGapWarnings(result.warnings);
     } catch (caught) {
       setGapError(caught instanceof Error ? caught.message : 'Could not load gap history');
     } finally {
-      setIsLoadingHistory(false);
+      setIsLoadingGapHistory(false);
     }
   }
 
@@ -221,6 +257,51 @@ export function App() {
 
   function toggleGapPaper(docId: string): void {
     setGapPapers((current) => current.map((paper) => (paper.doc_id === docId ? { ...paper, selected: !paper.selected } : paper)));
+  }
+
+  async function handleSuggest(): Promise<void> {
+    if (!activeGapId) {
+      return;
+    }
+    setIsSuggesting(true);
+    setExperimentError(null);
+    try {
+      const trimmedTopic = experimentTopic.trim();
+      const result = await suggestExperiments(activeGapId, trimmedTopic.length > 0 ? trimmedTopic : undefined);
+      setPlans(result.experiments);
+      setExperimentWarnings(result.warnings);
+    } catch (caught) {
+      setExperimentError(caught instanceof Error ? caught.message : 'Could not suggest experiments');
+    } finally {
+      setIsSuggesting(false);
+    }
+  }
+
+  async function loadPlans(gapId: string): Promise<void> {
+    setIsLoadingPlans(true);
+    setExperimentError(null);
+    try {
+      const result = await listExperimentHistory(gapId);
+      setPlans(result.experiments);
+      setExperimentWarnings(result.warnings);
+    } catch (caught) {
+      setExperimentError(caught instanceof Error ? caught.message : 'Could not load experiment history');
+    } finally {
+      setIsLoadingPlans(false);
+    }
+  }
+
+  function selectGap(gapId: string): void {
+    setSelectedGapId(gapId);
+    setManualGapId('');
+    setExperimentTopic('');
+  }
+
+  function updateManualGapId(value: string): void {
+    setManualGapId(value);
+    if (value.trim()) {
+      setSelectedGapId('');
+    }
   }
 
   return (
@@ -252,14 +333,11 @@ export function App() {
               <h2>Papers</h2>
               <span className="status-pill">{selectedReadingDocIds.length} selected</span>
             </div>
-
             <label className="file-button full-width">
               {isUploadingReadingPaper ? 'Uploading' : 'Upload PDFs'}
               <input accept="application/pdf" disabled={isUploadingReadingPaper} multiple onChange={handleReadingUpload} type="file" />
             </label>
-
             {readingUploadError ? <p className="error-banner" role="alert">{readingUploadError}</p> : null}
-
             <div className="selection-actions">
               <button className="secondary-button" onClick={() => setSelectedReadingDocIds(readingPapers.map((paper) => paper.doc_id))} type="button">
                 Select all
@@ -268,7 +346,6 @@ export function App() {
                 Clear
               </button>
             </div>
-
             <ul className="paper-list">
               {readingPapers.map((paper) => (
                 <li className="paper-list-item" key={paper.doc_id}>
@@ -293,7 +370,6 @@ export function App() {
               ))}
             </ul>
           </aside>
-
           <ReadingQA
             error={qaError}
             history={history}
@@ -308,7 +384,9 @@ export function App() {
             setQuestion={setQuestion}
           />
         </section>
-      ) : (
+      ) : null}
+
+      {activeModule === 'gaps' ? (
         <section className="workspace">
           <aside className="sidebar" aria-label="Papers">
             <div className="panel-header">
@@ -339,13 +417,12 @@ export function App() {
               )}
             </div>
           </aside>
-
           <section className="analysis-panel" aria-label="Gap analysis">
             <div className="analysis-form">
               <div className="form-heading">
                 <label htmlFor="topic">Research topic</label>
-                <button className="secondary-button" type="button" onClick={() => void loadGapHistory()} disabled={isLoadingHistory}>
-                  {isLoadingHistory ? 'Loading' : 'History'}
+                <button className="secondary-button" type="button" onClick={() => void loadGapHistory()} disabled={isLoadingGapHistory}>
+                  {isLoadingGapHistory ? 'Loading' : 'History'}
                 </button>
               </div>
               <div className="topic-row">
@@ -360,7 +437,6 @@ export function App() {
                 </button>
               </div>
             </div>
-
             {gapError ? <p className="error-banner">{gapError}</p> : null}
             {gapWarnings.length > 0 ? (
               <ul className="warning-list">
@@ -369,11 +445,93 @@ export function App() {
                 ))}
               </ul>
             ) : null}
-
             <GapList gaps={gaps} />
           </section>
         </section>
-      )}
+      ) : null}
+
+      {activeModule === 'experiments' ? (
+        <section className="workspace">
+          <aside className="sidebar" aria-label="Gap history">
+            <div className="panel-header">
+              <h2>Stored gaps</h2>
+              <button className="secondary-button" type="button" onClick={() => void loadGapHistory()} disabled={isLoadingGapHistory}>
+                {isLoadingGapHistory ? 'Loading' : 'Refresh'}
+              </button>
+            </div>
+            <div className="gap-list compact">
+              {gaps.length === 0 ? (
+                <p className="muted">No stored gaps found.</p>
+              ) : (
+                gaps.map((gap) => (
+                  <button
+                    className={gap.gap_id === selectedGapId ? 'gap-row selected' : 'gap-row'}
+                    key={gap.gap_id}
+                    type="button"
+                    onClick={() => selectGap(gap.gap_id)}
+                  >
+                    <span className="value-level">{gap.value_level}</span>
+                    <strong>{gap.title}</strong>
+                    <small>{gap.description}</small>
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="manual-gap">
+              <label htmlFor="manual-gap-id">Gap ID</label>
+              <input
+                id="manual-gap-id"
+                value={manualGapId}
+                onChange={(event) => updateManualGapId(event.target.value)}
+                placeholder="gap-123"
+              />
+            </div>
+          </aside>
+          <section className="analysis-panel" aria-label="Experiment suggestions">
+            <section className="selected-gap">
+              <div>
+                <p className="eyebrow">Selected gap</p>
+                <h2>{selectedGap?.title ?? (activeGapId || 'No gap selected')}</h2>
+                {selectedGap ? <p>{selectedGap.description}</p> : null}
+              </div>
+              {selectedGap ? <span className="value-badge value-badge-mid">{selectedGap.value_level}</span> : null}
+            </section>
+            <div className="plan-toolbar">
+              <span>{plans.length} saved plan{plans.length === 1 ? '' : 's'}</span>
+              <button className="secondary-button" type="button" onClick={() => void loadPlans(activeGapId)} disabled={!activeGapId || isLoadingPlans}>
+                {isLoadingPlans ? 'Loading' : 'Reload plans'}
+              </button>
+            </div>
+            <div className="suggest-form">
+              <label htmlFor="experiment-topic">Optional topic context</label>
+              <textarea
+                id="experiment-topic"
+                value={experimentTopic}
+                onChange={(event) => setExperimentTopic(event.target.value)}
+                placeholder="Longitudinal RAG robustness under deployment drift"
+              />
+              <button type="button" onClick={() => void handleSuggest()} disabled={!canSuggest}>
+                {isSuggesting ? 'Generating' : 'Suggest experiments'}
+              </button>
+            </div>
+            {experimentError ? <p className="error-banner">{experimentError}</p> : null}
+            {experimentWarnings.length > 0 ? (
+              <ul className="warning-list">
+                {experimentWarnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="plans">
+              {plans.length === 0 ? (
+                <p className="muted">Experiment plans will appear here.</p>
+              ) : (
+                plans.map((plan) => <ExperimentPlanCard key={plan.experiment_id} plan={plan} />)
+              )}
+            </div>
+          </section>
+        </section>
+      ) : null}
     </main>
   );
 }

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from pathlib import Path
 
 import httpx
 
@@ -11,7 +12,7 @@ from backend.main import app
 from backend.models.schemas import ExperimentPlan, ExperimentSuggestRequest, GapItem
 from backend.repositories.sqlite_store import SQLiteStore
 from backend.services.arxiv_search import ArxivSearchClient
-from backend.services.semantic_scholar import ExternalPaper
+from backend.services.external_paper import ExternalPaper
 
 
 def test_experiment_suggestion_contains_literature_supported_plan() -> None:
@@ -184,87 +185,17 @@ def test_arxiv_client_parses_atom_response_shape() -> None:
     assert papers[0].year == 2025
 
 
-def test_experiment_suggestion_skips_semantic_scholar_by_default(monkeypatch, tmp_path) -> None:
-    class BlockingSemanticScholarClient:
-        def __init__(self, *args, **kwargs) -> None:
-            raise AssertionError("Semantic Scholar should be disabled by default.")
+def test_backend_production_code_does_not_reference_deprecated_literature_provider() -> None:
+    backend_root = Path(__file__).resolve().parents[1]
+    deprecated = "semantic" + "_scholar"
 
-    class StubArxivSearchClient:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
+    offenders = [
+        path.relative_to(backend_root)
+        for path in backend_root.rglob("*.py")
+        if "tests" not in path.parts and deprecated in path.read_text(encoding="utf-8").lower()
+    ]
 
-        async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
-            return [
-                ExternalPaper(
-                    paper_id=f"arxiv-{index}",
-                    title=f"Experiment support {index}",
-                    abstract="Evidence for experiment design.",
-                    year=2025,
-                )
-                for index in range(1, limit + 1)
-            ], []
-
-    monkeypatch.setenv("SQLITE_URL", str(tmp_path / "experiments.db"))
-    get_settings.cache_clear()
-    monkeypatch.setattr(experiment_chain, "SemanticScholarClient", BlockingSemanticScholarClient)
-    monkeypatch.setattr(experiment_chain, "ArxivSearchClient", StubArxivSearchClient)
-    client = TestClient(app)
-
-    response = client.post(
-        "/api/v1/experiments/suggest",
-        json={"gap_id": "gap-arxiv", "topic": "rag experiments"},
-    )
-
-    assert response.status_code == 200
-    get_settings.cache_clear()
-    assert response.json()["experiments"][0]["support_papers"][0] == "arxiv-1"
-
-
-def test_experiment_suggestion_does_not_pass_semantic_scholar_credentials(monkeypatch, tmp_path) -> None:
-    captured_kwargs: list[dict[str, object]] = []
-
-    class CapturingSemanticScholarClient:
-        def __init__(self, **kwargs: object) -> None:
-            captured_kwargs.append(kwargs)
-
-        async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
-            return [
-                ExternalPaper(
-                    paper_id=f"semantic-{index}",
-                    title=f"Semantic support {index}",
-                    abstract="Evidence for experiment design.",
-                    year=2025,
-                )
-                for index in range(1, limit + 1)
-            ], []
-
-    class StubArxivSearchClient:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
-
-        async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
-            return [
-                ExternalPaper(
-                    paper_id=f"arxiv-{index}",
-                    title=f"Arxiv support {index}",
-                    abstract="Evidence for experiment design.",
-                    year=2025,
-                )
-                for index in range(1, limit + 1)
-            ], []
-
-    monkeypatch.setattr(experiment_chain, "SemanticScholarClient", CapturingSemanticScholarClient)
-    monkeypatch.setattr(experiment_chain, "ArxivSearchClient", StubArxivSearchClient)
-
-    response = asyncio.run(
-        experiment_chain.suggest_experiments(
-            ExperimentSuggestRequest(gap_id="gap-semantic", topic="rag experiments"),
-            Settings(enable_semantic_scholar=True, sqlite_url=f"sqlite:///{tmp_path / 'experiment.db'}"),
-        )
-    )
-
-    assert response.experiments[0].support_papers[0] == "semantic-1"
-    assert captured_kwargs == [{"timeout_seconds": 3.0}]
+    assert offenders == []
 
 
 def test_experiment_suggestion_repairs_fenced_json(monkeypatch, tmp_path) -> None:

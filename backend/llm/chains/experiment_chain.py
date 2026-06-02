@@ -6,24 +6,17 @@ from backend.core.config import Settings
 from backend.llm.llm_service import get_chat_provider
 from backend.models.schemas import ExperimentPlan, ExperimentSuggestRequest, ExperimentSuggestResponse
 from backend.services.arxiv_search import ArxivSearchClient
-from backend.services.semantic_scholar import ExternalPaper, SemanticScholarClient
+from backend.services.external_paper import ExternalPaper
 
 
 async def suggest_experiments(request: ExperimentSuggestRequest, settings: Settings) -> ExperimentSuggestResponse:
     """Generate literature-supported experiment plans for a research gap."""
     query = request.topic or request.gap_id
-    semantic_papers: list[ExternalPaper] = []
-    semantic_warnings: list[str] = []
-    if settings.enable_semantic_scholar:
-        semantic_papers, semantic_warnings = await SemanticScholarClient(
-            timeout_seconds=settings.external_search_timeout_seconds,
-        ).search(query, limit=3)
-    arxiv_limit = max(2, 5 - len(semantic_papers))
     arxiv_papers, arxiv_warnings = await ArxivSearchClient(timeout_seconds=settings.external_search_timeout_seconds).search(
         query,
-        limit=arxiv_limit,
+        limit=5,
     )
-    papers = [*semantic_papers, *arxiv_papers][:5]
+    papers = arxiv_papers[:5]
     selected = request.runtime_model_config
     prompt = (
         "EXPERIMENT_JSON\n"
@@ -38,7 +31,7 @@ async def suggest_experiments(request: ExperimentSuggestRequest, settings: Setti
     experiments, repair_warnings = _parse_experiment_items(raw_text, request.gap_id, support_papers, query)
     return ExperimentSuggestResponse(
         experiments=experiments,
-        warnings=[*semantic_warnings, *arxiv_warnings, *chat_warnings, *repair_warnings],
+        warnings=[*arxiv_warnings, *chat_warnings, *repair_warnings],
     )
 
 

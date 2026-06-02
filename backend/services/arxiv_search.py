@@ -2,7 +2,7 @@ from xml.etree import ElementTree
 
 import httpx
 
-from backend.services.semantic_scholar import ExternalPaper
+from backend.services.external_paper import ExternalPaper
 
 
 class ArxivSearchClient:

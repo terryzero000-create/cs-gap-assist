@@ -98,7 +98,7 @@ Implemented:
 
 - `/api/v1/gaps/analyze`
 - Returns `gaps` with `gap_id`, `title`, `value_level`, `description`, `evidence_papers`, and `created_at`.
-- Mock Semantic Scholar and arXiv search clients.
+- Mock external literature search clients.
 - Persists gaps in SQLite.
 - Basic frontend component: `frontend/src/components/GapAnalysis/GapList.tsx`.
 
@@ -111,7 +111,7 @@ Known limitations:
 Next steps:
 
 - Merge latest `codex/foundation`.
-- Replace mock external search with real Semantic Scholar/arXiv clients.
+- Replace mock external search with non-Semantic-Scholar providers such as OpenAlex and arXiv.
 - Add frontend topic input and uploaded-paper selector.
 - Add schema repair/validation around model JSON output.
 
@@ -145,9 +145,7 @@ Implemented:
 - `/api/v1/experiments/history`
 - `/api/v1/gaps/history` for selecting stored Gaps on this branch.
 - arXiv search client with Atom parsing and deterministic fallback.
-- Semantic Scholar client with live response parsing and deterministic fallback.
-- Semantic Scholar is disabled by default through `ENABLE_SEMANTIC_SCHOLAR=false`; arXiv is the default external literature source.
-- Semantic Scholar access does not require or use an API key on this branch.
+- Semantic Scholar is deprecated and is no longer present in the Experiment Suggestion backend.
 - Model JSON repair and validation for fenced/prose-wrapped JSON, invalid JSON, missing `experiments`, malformed items, and missing required experiment fields.
 - Deterministic fallback experiment generation when model output cannot be repaired.
 - Usable frontend Experiment Suggestion workbench:
@@ -162,7 +160,6 @@ Known limitations:
 
 - Branch is still isolated and has not been merged into an integration branch.
 - arXiv can fail in restricted or offline networks; deterministic fallback keeps the workflow usable.
-- Semantic Scholar is optional, keyless, and disabled by default because access can be unreliable in mainland China.
 - The workbench depends on stored Gap records from local SQLite history; full Gap generation is still on `codex/research-gap`.
 - Real DeepSeek behavior needs API keys and quality evaluation.
 - Experiment-plan quality is MVP-level and should be evaluated against real papers before production use.
@@ -201,7 +198,7 @@ Known limitations:
 Next steps:
 
 - Merge latest `codex/foundation`.
-- Add real citation expansion through Semantic Scholar when available.
+- Add real citation expansion through non-Semantic-Scholar providers when available.
 - Add graph size caps and key-node scoring policy.
 - Add keyword search UI.
 

@@ -32,7 +32,7 @@ The project has a working repository foundation and one isolated branch per feat
   - Adds `/api/v1/experiments/suggest` with datasets, metrics, baselines, steps, risks, and 3-5 support papers.
   - Adds `/api/v1/experiments/history` for persisted experiment plan history.
   - Adds a usable frontend Experiment Suggestion workbench that loads stored Gaps and suggests experiments for the selected Gap.
-  - Uses arXiv as the default external literature source with deterministic fallback; Semantic Scholar is optional and disabled by default.
+  - Uses arXiv as the external literature source with deterministic fallback; Semantic Scholar is deprecated and not used.
   - Repairs fenced/prose-wrapped or invalid model JSON and falls back to deterministic experiment plans when needed.
 - `codex/citation-graph`
   - Citation evolution graph module.
@@ -52,6 +52,7 @@ The project has a working repository foundation and one isolated branch per feat
 - Frontend TypeScript uses strict mode and should not introduce `any`.
 - Active API keys must come from `.env`; do not hardcode keys.
 - Missing model keys should degrade to mock providers with explicit warnings.
+- Semantic Scholar is deprecated for this project and must not be used for new citation or literature retrieval work.
 
 ## Foundation Capabilities
 
@@ -79,8 +80,7 @@ The project has a working repository foundation and one isolated branch per feat
 ## External Literature Policy
 
 - arXiv is the default external literature source and does not require an API key.
-- Semantic Scholar is optional and disabled by default with `ENABLE_SEMANTIC_SCHOLAR=false`.
-- Semantic Scholar runs keyless on this project; do not add or require a Semantic Scholar API key.
+- Semantic Scholar is deprecated and is not used by the Experiment Suggestion branch.
 - External literature failures degrade to deterministic fallback evidence with warnings.
 
 ## Storage Policy

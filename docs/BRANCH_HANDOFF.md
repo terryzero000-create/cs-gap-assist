@@ -59,6 +59,61 @@ Expected baseline:
 - Backend: `9 passed`
 - Frontend: TypeScript check passes.
 
+## codex/integration-mvp
+
+Goal: first combined MVP application branch.
+
+Current status: integration MVP complete.
+
+Created from:
+
+- `codex/foundation`
+
+Merged in order:
+
+1. `codex/reading-qa`
+2. `codex/research-gap`
+3. `codex/experiment-suggest`
+4. `codex/citation-graph`
+5. `codex/knowledge-base`
+
+Implemented:
+
+- Registers config, citation, experiment, gap, knowledge, paper, and reading routers in `backend/main.py`.
+- Preserves all shared schemas in `backend/models/schemas.py`, including Reading QA, Gap, Experiment, Citation Graph, and Knowledge Base contracts.
+- Preserves SQLite paper, gap, experiment, note, tag, and favorite storage.
+- Preserves vector filtering by `doc_id`, `tags`, and `module_source`.
+- Keeps Semantic Scholar disabled/unused.
+- Keeps Citation Graph OpenAlex expansion optional behind `ENABLE_OPENALEX=true` and `OPENALEX_API_KEY`, with deterministic fallback when unavailable.
+- Provides a unified frontend navigation with five tabs:
+  - Reading QA
+  - Research Gap
+  - Experiment Suggest
+  - Citation Graph
+  - Knowledge Base
+- Rewrites the Knowledge Base panel text to clean English and keeps upload, search, note creation, tag editing, favorite toggling, and unified search.
+
+Verification on branch:
+
+```powershell
+python -m pytest backend/tests -q
+npm test --prefix frontend
+npm run build --prefix frontend
+```
+
+Current verification:
+
+- Backend: `36 passed`
+- Frontend: `tsc --noEmit` passed
+- Frontend build passed
+
+Known limitations:
+
+- The frontend is a unified MVP surface, not a polished production workflow.
+- Cross-module deep links are not implemented yet.
+- Real DeepSeek/OpenAI/OpenAlex behavior still needs API keys and integration testing.
+- Browser-level QA against a running backend/frontend pair is still a recommended next step.
+
 ## codex/reading-qa
 
 Goal: paper intensive reading Q&A.
@@ -307,19 +362,20 @@ npm run build --prefix frontend
 
 ## Integration Strategy
 
-Recommended order:
+Completed order for `codex/integration-mvp`:
 
 1. Keep `codex/foundation` as the source of shared contracts.
-2. For each module branch, merge or rebase latest `codex/foundation`.
-3. Resolve conflicts in shared files deliberately, especially:
+2. Create `codex/integration-mvp` from `codex/foundation`.
+3. Merge module branches one by one in the requested order.
+4. Resolve conflicts in shared files deliberately, especially:
    - `backend/main.py`
    - `backend/models/schemas.py`
    - `backend/repositories/sqlite_store.py`
    - `backend/rag/vector_store.py`
    - `frontend/src/types/index.ts`
    - `frontend/src/api/client.ts`
-4. Create a new integration branch, for example `codex/integration-mvp`.
-5. Merge module branches one by one and run tests after each merge.
+   - `frontend/src/App.tsx`
+5. Run backend tests, frontend type check, and frontend build after each merge.
 
-Do not merge all feature branches at once. The branches intentionally touch some shared files, so one-at-a-time integration will be much easier to debug.
+The one-at-a-time merge is complete on `codex/integration-mvp`.
 

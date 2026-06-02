@@ -8,9 +8,11 @@ CS Gap Assist is a research gap analysis assistant for computer science papers. 
 
 ## Current Progress
 
-Overall first-version product progress: about 55%.
+Overall first-version product progress: about 65%.
 
 Foundation progress: about 70%.
+
+Integration MVP progress: complete for the first combined branch.
 
 Reading QA branch MVP progress: 100% for isolated branch handoff.
 
@@ -22,13 +24,18 @@ Citation Graph branch MVP progress: 100% for isolated branch handoff.
 
 Knowledge Base branch MVP progress: 100% for isolated branch handoff.
 
-The project has a working repository foundation and one isolated branch per feature module. The current implementation is still an MVP scaffold: several external integrations use deterministic mock/fallback behavior so development can continue without API keys or quota.
+The project has a working repository foundation, one feature branch per module, and an integrated MVP branch that combines Reading QA, Research Gap, Experiment Suggestion, Citation Graph, and Knowledge Base behind one frontend navigation. The current implementation is still an MVP scaffold: several external integrations use deterministic mock/fallback behavior so development can continue without API keys or quota.
 
 ## Branch Structure
 
 - `codex/foundation`
   - Shared backend and frontend foundation.
   - FastAPI app, `/api/v1` prefix, async route contract, unified error shape, PDF upload, SQLite metadata store, Chroma-style vector store wrapper with memory fallback, model provider abstraction, frontend TypeScript/Vite skeleton.
+- `codex/integration-mvp`
+  - Combined MVP branch created from `codex/foundation`.
+  - Merges `codex/reading-qa`, `codex/research-gap`, `codex/experiment-suggest`, `codex/citation-graph`, and `codex/knowledge-base` in order.
+  - Registers all feature routers in one FastAPI app.
+  - Provides unified frontend tabs for Reading QA, Research Gap, Experiment Suggest, Citation Graph, and Knowledge Base.
 - `codex/reading-qa`
   - Paper reading Q&A module.
   - Adds `/api/v1/reading/qa` and returns answer plus paragraph-level sources.
@@ -112,16 +119,18 @@ Run from repository root:
 ```powershell
 python -m pytest backend/tests -q
 npm test --prefix frontend
+npm run build --prefix frontend
 ```
 
-Current foundation verification at the time of this document:
+Current `codex/integration-mvp` verification at the time of this document:
 
-- Backend on `codex/research-gap`: `16 passed`
-- Frontend on `codex/research-gap`: production build passes with `npm run build --prefix frontend`
+- Backend: `36 passed`
+- Frontend: `tsc --noEmit` passed
+- Frontend build passed
 
 ## Known MVP Limitations
 
-- Module branches are isolated and have not yet been merged into one integrated application branch.
+- The integrated branch is an MVP, not a production deployment.
 - Some external literature behavior still uses deterministic fallback when live services are unavailable.
 - OpenAlex and arXiv behavior is optional and mostly deterministic mock/fallback code.
 - Reading QA, Research Gap, Experiment Suggestion, Citation Graph, and Knowledge Base have usable MVP workflows on their feature branches.
@@ -143,6 +152,7 @@ Do not assume prior chat context.
 Replace `<branch-name>` with one of:
 
 - `codex/foundation`
+- `codex/integration-mvp`
 - `codex/reading-qa`
 - `codex/research-gap`
 - `codex/experiment-suggest`

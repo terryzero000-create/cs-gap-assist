@@ -171,6 +171,13 @@ button:disabled {
   margin-bottom: 16px;
 }
 
+.form-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
 .analysis-form label {
   color: #263442;
   font-weight: 700;
@@ -187,6 +194,12 @@ button:disabled {
   border-radius: 6px;
   min-height: 44px;
   padding: 0 12px;
+}
+
+.secondary-button {
+  background: #e5e9ee;
+  color: #263442;
+  min-height: 34px;
 }
 
 .error-banner,

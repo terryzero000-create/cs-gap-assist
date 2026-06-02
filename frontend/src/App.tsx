@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
-import { analyzeGaps, uploadPaper } from './api/client';
+import { analyzeGaps, listGapHistory, uploadPaper } from './api/client';
 import { GapList } from './components/GapAnalysis/GapList';
 import './style.css';
 import type { GapItem, PaperUploadResponse } from './types';
@@ -16,10 +16,15 @@ export function App() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectedDocIds = useMemo(() => papers.filter((paper) => paper.selected).map((paper) => paper.doc_id), [papers]);
   const canAnalyze = topic.trim().length > 0 && selectedDocIds.length > 0 && !isAnalyzing;
+
+  useEffect(() => {
+    void loadHistory();
+  }, []);
 
   async function handleUpload(fileList: FileList | null): Promise<void> {
     const file = fileList?.[0];
@@ -50,6 +55,20 @@ export function App() {
       setError(caught instanceof Error ? caught.message : 'Analysis failed');
     } finally {
       setIsAnalyzing(false);
+    }
+  }
+
+  async function loadHistory(): Promise<void> {
+    setIsLoadingHistory(true);
+    setError(null);
+    try {
+      const result = await listGapHistory();
+      setGaps(result.gaps);
+      setWarnings(result.warnings);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not load gap history');
+    } finally {
+      setIsLoadingHistory(false);
     }
   }
 
@@ -95,7 +114,12 @@ export function App() {
 
         <section className="analysis-panel" aria-label="Gap analysis">
           <div className="analysis-form">
-            <label htmlFor="topic">Research Topic</label>
+            <div className="form-heading">
+              <label htmlFor="topic">Research Topic</label>
+              <button className="secondary-button" type="button" onClick={() => void loadHistory()} disabled={isLoadingHistory}>
+                {isLoadingHistory ? 'Loading' : 'History'}
+              </button>
+            </div>
             <div className="topic-row">
               <input
                 id="topic"

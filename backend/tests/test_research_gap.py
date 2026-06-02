@@ -37,6 +37,26 @@ def test_gap_analysis_returns_contract_shape() -> None:
     assert first["created_at"]
 
 
+def test_gap_history_returns_persisted_results() -> None:
+    client = TestClient(app)
+    upload = client.post(
+        "/api/v1/papers/upload",
+        files={"file": ("history.pdf", b"RAG evaluation misses production drift scenarios.", "application/pdf")},
+    )
+    doc_id = upload.json()["doc_id"]
+    analyzed = client.post(
+        "/api/v1/gaps/analyze",
+        json={"topic": "rag production drift", "doc_ids": [doc_id]},
+    )
+    gap_id = analyzed.json()["gaps"][0]["gap_id"]
+
+    response = client.get("/api/v1/gaps/history")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert any(gap["gap_id"] == gap_id for gap in body["gaps"])
+
+
 def test_semantic_scholar_client_parses_live_response_shape() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.params["fields"] == "paperId,title,abstract,year,url"

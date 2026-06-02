@@ -26,3 +26,7 @@ export async function analyzeGaps(topic: string, docIds: string[], modelConfig?:
     }),
   );
 }
+
+export async function listGapHistory(): Promise<GapAnalysisResponse> {
+  return parseResponse<GapAnalysisResponse>(await fetch(`${API_PREFIX}/gaps/history`));
+}

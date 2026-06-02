@@ -51,6 +51,8 @@ class MockChatProvider(ChatProvider):
                 ]
             }
             return json.dumps(payload), ["Chat provider fell back to mock generation."]
+        if "READING_QA" in prompt:
+            return "根据已检索到的来源段落，可以给出一个有依据的回答。[1]", ["Chat provider fell back to mock generation."]
         return "Mock answer grounded in retrieved source paragraphs.", ["Chat provider fell back to mock generation."]
 
 

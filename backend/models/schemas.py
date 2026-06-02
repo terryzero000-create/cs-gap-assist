@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 ValueLevel = Literal["high", "mid"]
@@ -75,10 +75,19 @@ class ReadingQARequest(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    question: str
-    doc_ids: list[str]
-    top_k: int = 5
+    question: str = Field(min_length=1)
+    doc_ids: list[str] = Field(min_length=1)
+    top_k: int = Field(default=5, ge=1, le=10)
     runtime_model_config: ModelConfig | None = Field(default=None, alias="model_config")
+
+    @field_validator("question")
+    @classmethod
+    def question_must_not_be_blank(cls, value: str) -> str:
+        """Reject whitespace-only questions."""
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Question must not be blank.")
+        return stripped
 
 
 class SourceParagraph(BaseModel):

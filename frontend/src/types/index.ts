@@ -38,3 +38,17 @@ export interface GapAnalysisResponse {
   gaps: GapItem[];
   warnings: string[];
 }
+
+export interface ReadingQAResponse {
+  answer: string;
+  sources: SourceParagraph[];
+  warnings: string[];
+}
+
+export interface ReadingQAHistoryItem {
+  id: string;
+  question: string;
+  paperTitles: string[];
+  createdAt: string;
+  result: ReadingQAResponse;
+}

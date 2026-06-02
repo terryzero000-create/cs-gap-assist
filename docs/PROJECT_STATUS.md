@@ -8,15 +8,19 @@ CS Gap Assist is a research gap analysis assistant for computer science papers. 
 
 ## Current Progress
 
-Overall first-version product progress: about 45%.
+Overall first-version product progress: about 55%.
 
 Foundation progress: about 70%.
+
+Reading QA branch MVP progress: 100% for isolated branch handoff.
 
 Research Gap branch MVP progress: 100% for isolated branch handoff.
 
 Experiment Suggestion branch MVP progress: 100% for isolated branch handoff.
 
 Citation Graph branch MVP progress: 100% for isolated branch handoff.
+
+Knowledge Base branch MVP progress: 100% for isolated branch handoff.
 
 The project has a working repository foundation and one isolated branch per feature module. The current implementation is still an MVP scaffold: several external integrations use deterministic mock/fallback behavior so development can continue without API keys or quota.
 
@@ -46,7 +50,8 @@ The project has a working repository foundation and one isolated branch per feat
   - Adds `/api/v1/citations/graph` with D3-ready `nodes` and `links`, node caps, key-node scoring, optional OpenAlex expansion, and a usable keyword search UI.
 - `codex/knowledge-base`
   - Personal knowledge base module.
-  - Adds paper listing, note creation/listing, and unified search.
+  - Adds paper listing, note creation/listing, tag/favorite updates, and unified search across papers, notes, chunks, Gap history, and experiment history.
+  - Adds a usable frontend knowledge-base workbench with upload, search, filters, note creation, tag editing, and favorite toggling.
 
 ## Shared Contracts
 
@@ -119,7 +124,7 @@ Current foundation verification at the time of this document:
 - Module branches are isolated and have not yet been merged into one integrated application branch.
 - Some external literature behavior still uses deterministic fallback when live services are unavailable.
 - OpenAlex and arXiv behavior is optional and mostly deterministic mock/fallback code.
-- The Research Gap, Experiment Suggestion, and Citation Graph branches have usable MVP workflows; other feature branch frontends may still be skeletons.
+- Reading QA, Research Gap, Experiment Suggestion, Citation Graph, and Knowledge Base have usable MVP workflows on their feature branches.
 - RAG ranking is simple and designed for local development, not production retrieval quality.
 - DeepSeek and OpenAI real calls need real API keys and further integration testing.
 - Chroma is optional in tests; the memory mirror preserves local behavior.

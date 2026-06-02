@@ -258,34 +258,51 @@ Current branch verification:
 
 Goal: personal knowledge base for papers, notes, tags, favorites, and history.
 
+Current status: isolated branch MVP complete.
+
+Key commits after foundation merge:
+
+- `fa2d1a9 Merge branch 'codex/foundation' into codex/knowledge-base`
+
 Implemented:
 
 - `/api/v1/knowledge/papers`
+- `/api/v1/knowledge/papers/{doc_id}` for tag and favorite updates
 - `/api/v1/knowledge/notes`
 - `/api/v1/knowledge/search`
 - Lists uploaded papers.
 - Creates and searches notes.
 - Searches chunks from the vector store.
-- Basic frontend component: `frontend/src/components/KnowledgeBase/KnowledgeBasePanel.tsx`.
+- Filters papers by tag and favorite state.
+- Includes saved Gap history and experiment plans in unified knowledge search.
+- Usable frontend Knowledge Base workbench:
+  - Uploads papers.
+  - Searches papers, notes, chunks, Gap history, and experiment history.
+  - Filters by tags and favorite state.
+  - Creates notes associated with stored papers.
+  - Edits paper tags and toggles favorite state.
+- Vite dev proxy for `/api` to `http://127.0.0.1:8000`.
 
 Known limitations:
 
-- Depends on branch-local version of foundation before `ffa00fe`; merge latest `codex/foundation` before continuing.
-- Favorite/tag update API is not yet exposed on this branch.
-- Gap and experiment history are not yet surfaced through knowledge search.
+- Branch is still isolated and has not been merged into an integration branch.
+- Gap and experiment history search depends on records already present in the local SQLite store; full Gap generation and experiment suggestion workflows live on their separate branches.
+- Chunk search uses the in-process vector store mirror, so indexed chunks from previous server processes may not be present until papers are uploaded in the current runtime.
+- The frontend intentionally caps the rendered paper list for local responsiveness; backend pagination is not yet implemented.
 
 Next steps:
 
-- Merge latest `codex/foundation`.
-- Add favorite/tag update endpoints.
-- Include gaps and experiments in unified search.
-- Build a real frontend knowledge-base page with filters.
+- Create or update an integration branch when combining feature modules.
+- Add backend pagination and richer filters for large paper libraries.
+- Add cross-module navigation after integration with Research Gap and Experiment Suggestion.
+- Add browser-level QA after integration with the other feature modules.
 
 Verification on branch:
 
 ```powershell
-python -m pytest backend/tests/test_foundation.py backend/tests/test_knowledge_base.py -q
+python -m pytest backend/tests -q
 npm test --prefix frontend
+npm run build --prefix frontend
 ```
 
 ## Integration Strategy

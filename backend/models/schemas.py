@@ -76,6 +76,13 @@ class PaperListResponse(BaseModel):
     papers: list[PaperRecord]
 
 
+class PaperCollectionUpdateRequest(BaseModel):
+    """Request to update personal collection metadata for a paper."""
+
+    tags: list[str] = Field(default_factory=list)
+    is_favorite: bool = False
+
+
 class ReadingQARequest(BaseModel):
     """Question request over uploaded papers."""
 
@@ -218,3 +225,5 @@ class KnowledgeSearchResponse(BaseModel):
     papers: list[PaperRecord] = Field(default_factory=list)
     notes: list[NoteRecord] = Field(default_factory=list)
     chunks: list[PaperChunk] = Field(default_factory=list)
+    gaps: list[GapItem] = Field(default_factory=list)
+    experiments: list[ExperimentPlan] = Field(default_factory=list)

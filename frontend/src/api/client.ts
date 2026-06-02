@@ -2,8 +2,13 @@ import type {
   CitationGraphResponse,
   ExperimentSuggestResponse,
   GapAnalysisResponse,
+  KnowledgeSearchResponse,
   ModelConfig,
+  NoteCreateRequest,
+  NoteRecord,
+  PaperCollectionUpdateRequest,
   PaperListResponse,
+  PaperRecord,
   PaperUploadResponse,
   ReadingQAResponse,
 } from '../types';
@@ -71,4 +76,47 @@ export async function suggestExperiments(gapId: string, topic?: string, modelCon
 export async function fetchCitationGraph(keyword: string, maxNodes: number): Promise<CitationGraphResponse> {
   const params = new URLSearchParams({ keyword, max_nodes: String(maxNodes) });
   return parseResponse<CitationGraphResponse>(await fetch(`${API_PREFIX}/citations/graph?${params.toString()}`));
+}
+
+export async function listKnowledgePapers(tag?: string, favoritesOnly = false): Promise<PaperRecord[]> {
+  const params = new URLSearchParams();
+  if (tag) {
+    params.set('tag', tag);
+  }
+  if (favoritesOnly) {
+    params.set('favorites_only', 'true');
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  return parseResponse<PaperRecord[]>(await fetch(`${API_PREFIX}/knowledge/papers${suffix}`));
+}
+
+export async function updateKnowledgePaper(docId: string, request: PaperCollectionUpdateRequest): Promise<PaperRecord> {
+  return parseResponse<PaperRecord>(
+    await fetch(`${API_PREFIX}/knowledge/papers/${docId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    }),
+  );
+}
+
+export async function createKnowledgeNote(request: NoteCreateRequest): Promise<NoteRecord> {
+  return parseResponse<NoteRecord>(
+    await fetch(`${API_PREFIX}/knowledge/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    }),
+  );
+}
+
+export async function searchKnowledge(query: string, tag?: string, favoritesOnly = false): Promise<KnowledgeSearchResponse> {
+  const params = new URLSearchParams({ query });
+  if (tag) {
+    params.set('tag', tag);
+  }
+  if (favoritesOnly) {
+    params.set('favorites_only', 'true');
+  }
+  return parseResponse<KnowledgeSearchResponse>(await fetch(`${API_PREFIX}/knowledge/search?${params.toString()}`));
 }

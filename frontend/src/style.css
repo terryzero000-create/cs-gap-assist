@@ -92,7 +92,13 @@ h4 {
 .history-heading-actions,
 .plan-toolbar,
 .citation-toolbar,
-.stat-row {
+.stat-row,
+.knowledge-toolbar,
+.search-form,
+.upload-form,
+.checkline,
+.record-head,
+.inline-edit {
   align-items: center;
   display: flex;
   gap: 8px;
@@ -139,7 +145,12 @@ h4 {
 .selected-gap,
 .plan-card,
 .graph-panel,
-.summary-panel {
+.summary-panel,
+.knowledge-panel,
+.paper-library,
+.note-panel,
+.results-panel,
+.record-card {
   background: #ffffff;
   border: 1px solid #d9e0e6;
   border-radius: 8px;
@@ -153,7 +164,8 @@ h4 {
 }
 
 .analysis-panel,
-.qa-panel {
+.qa-panel,
+.knowledge-panel {
   display: grid;
   gap: 16px;
   min-height: 640px;
@@ -164,7 +176,11 @@ h4 {
 .history-panel,
 .template-panel,
 .selected-gap,
-.summary-panel {
+.summary-panel,
+.paper-library,
+.note-panel,
+.results-panel,
+.record-card {
   padding: 16px;
 }
 
@@ -185,6 +201,11 @@ h4 {
   padding: 16px;
 }
 
+.knowledge-panel > .panel-header {
+  border-bottom: 0;
+  padding: 0;
+}
+
 .status-pill,
 .value-badge,
 .value-level {
@@ -199,6 +220,11 @@ h4 {
 .status-pill {
   background: #dbeafe;
   color: #1d4ed8;
+}
+
+.status-line {
+  color: #607080;
+  margin: 0;
 }
 
 .file-button {
@@ -293,7 +319,9 @@ h4 {
 .history-question,
 .gap-row strong,
 .gap-row small,
-.key-list strong {
+.key-list strong,
+.record-card h3,
+.result-group strong {
   overflow-wrap: anywhere;
 }
 
@@ -305,7 +333,9 @@ h4 {
 .form-actions,
 .section-heading span,
 .plan-toolbar,
-.key-list span {
+.key-list span,
+.record-card p,
+.result-group p {
   color: #607080;
 }
 
@@ -332,7 +362,8 @@ h4 {
 .question-form,
 .analysis-form,
 .suggest-form,
-.manual-gap {
+.manual-gap,
+.note-form {
   display: grid;
   gap: 8px;
 }
@@ -354,7 +385,13 @@ textarea,
 .topic-row input,
 .manual-gap input,
 .citation-toolbar input,
-.citation-toolbar select {
+.citation-toolbar select,
+.search-form input,
+.search-form select,
+.upload-form input,
+.note-form input,
+.note-form select,
+.inline-edit input {
   border: 1px solid #b8c4ce;
   border-radius: 6px;
   color: #17202a;
@@ -575,13 +612,15 @@ textarea {
   padding-left: 18px;
 }
 
-.support-papers {
+.support-papers,
+.tag-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.support-papers span {
+.support-papers span,
+.tag-row span {
   background: #ecfdf5;
   border-radius: 999px;
   color: #047857;
@@ -640,7 +679,91 @@ textarea {
   font-size: 24px;
 }
 
-@media (max-width: 820px) {
+.knowledge-toolbar {
+  align-items: stretch;
+  display: grid;
+  gap: 12px;
+}
+
+.search-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px auto auto;
+}
+
+.upload-form {
+  justify-content: end;
+}
+
+.checkline {
+  color: #263442;
+  font-weight: 700;
+}
+
+.checkline input {
+  width: auto;
+}
+
+.knowledge-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+
+.paper-library,
+.note-panel,
+.results-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.paper-library,
+.results-panel {
+  grid-column: span 1;
+}
+
+.results-panel {
+  grid-column: 1 / -1;
+}
+
+.record-card {
+  display: grid;
+  gap: 12px;
+}
+
+.record-card h3,
+.record-card p {
+  margin-bottom: 4px;
+}
+
+.icon-button {
+  background: #e5e9ee;
+  color: #263442;
+}
+
+.inline-edit {
+  align-items: stretch;
+}
+
+.result-columns {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.result-group {
+  background: #f7fafc;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.result-group article {
+  border-top: 1px solid #e5e9ee;
+  padding-top: 10px;
+}
+
+@media (max-width: 900px) {
   .app-shell {
     padding: 18px;
   }
@@ -655,14 +778,19 @@ textarea {
   .topic-row,
   .plan-grid,
   .citation-toolbar,
-  .citation-grid {
+  .citation-grid,
+  .knowledge-grid,
+  .search-form,
+  .result-columns {
     grid-template-columns: 1fr;
   }
 
   .topic-row button,
   .form-actions button,
   .suggest-form button,
-  .citation-toolbar button {
+  .citation-toolbar button,
+  .search-form button,
+  .upload-form button {
     width: 100%;
   }
 }

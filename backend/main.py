@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api import citation, config, experiment, gap, paper, reading
+from backend.api import citation, config, experiment, gap, knowledge, paper, reading
 from backend.core.config import get_settings
 from backend.core.errors import register_error_handlers
 
@@ -19,6 +19,7 @@ app.include_router(config.router, prefix=settings.api_prefix)
 app.include_router(citation.router, prefix=settings.api_prefix)
 app.include_router(experiment.router, prefix=settings.api_prefix)
 app.include_router(gap.router, prefix=settings.api_prefix)
+app.include_router(knowledge.router, prefix=settings.api_prefix)
 app.include_router(paper.router, prefix=settings.api_prefix)
 app.include_router(reading.router, prefix=settings.api_prefix)
 

@@ -13,6 +13,7 @@ import {
 import { CitationForceGraph } from './components/CitationGraph/CitationForceGraph';
 import { ExperimentPlanCard } from './components/ExperimentSuggest/ExperimentPlanCard';
 import { GapList } from './components/GapAnalysis/GapList';
+import { KnowledgeBasePanel } from './components/KnowledgeBase/KnowledgeBasePanel';
 import { ReadingQA } from './components/PaperUpload/ReadingQA';
 import './style.css';
 import type {
@@ -24,7 +25,7 @@ import type {
   ReadingQAResponse,
 } from './types';
 
-type ModuleKey = 'reading' | 'gaps' | 'experiments' | 'citations';
+type ModuleKey = 'reading' | 'gaps' | 'experiments' | 'citations' | 'knowledge';
 
 interface UploadedPaper extends PaperUploadResponse {
   selected: boolean;
@@ -39,6 +40,7 @@ const modules: { key: ModuleKey; label: string }[] = [
   { key: 'gaps', label: 'Research Gap' },
   { key: 'experiments', label: 'Experiment Suggest' },
   { key: 'citations', label: 'Citation Graph' },
+  { key: 'knowledge', label: 'Knowledge Base' },
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -621,6 +623,12 @@ export function App() {
               </aside>
             </div>
           </section>
+        </section>
+      ) : null}
+
+      {activeModule === 'knowledge' ? (
+        <section className="citation-workspace" aria-label="Knowledge base">
+          <KnowledgeBasePanel />
         </section>
       ) : null}
     </main>

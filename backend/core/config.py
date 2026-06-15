@@ -16,8 +16,11 @@ class Settings(BaseSettings):
     default_chat_provider: str = "deepseek"
     default_chat_model: str = "deepseek-v4-pro"
     openai_api_key: str | None = None
+    openai_base_url: str = "https://api.openai.com/v1"
     default_embedding_provider: str = "openai"
     default_embedding_model: str = "text-embedding-3-small"
+    local_bge_m3_base_url: str = "http://127.0.0.1:11434"
+    local_bge_m3_model: str = "bge-m3"
     enable_openalex: bool = False
     openalex_api_key: str | None = None
     external_search_timeout_seconds: float = 3.0

@@ -1,7 +1,9 @@
 from fastapi import APIRouter
 
 from backend.core.config import get_settings
-from backend.models.schemas import ModelConfigResponse, ModelOption
+from backend.llm.llm_service import list_chat_model_options
+from backend.models.schemas import ModelConfigResponse
+from backend.rag.embedder import list_embedding_model_options
 
 router = APIRouter(prefix="/config", tags=["config"])
 
@@ -16,24 +18,7 @@ async def list_models() -> ModelConfigResponse:
         default_embedding_provider=settings.default_embedding_provider,
         default_embedding_model=settings.default_embedding_model,
         providers={
-            "chat": [
-                ModelOption(
-                    provider="deepseek",
-                    model="deepseek-v4-pro",
-                    available=bool(settings.deepseek_api_key),
-                    warning=None if settings.deepseek_api_key else "DEEPSEEK_API_KEY missing; mock fallback will be used.",
-                ),
-                ModelOption(provider="deepseek", model="deepseek-v4-flash", available=bool(settings.deepseek_api_key)),
-                ModelOption(provider="mock", model="mock-chat", available=True),
-            ],
-            "embedding": [
-                ModelOption(
-                    provider="openai",
-                    model="text-embedding-3-small",
-                    available=bool(settings.openai_api_key),
-                    warning=None if settings.openai_api_key else "OPENAI_API_KEY missing; mock fallback will be used.",
-                ),
-                ModelOption(provider="mock", model="mock-embedding", available=True),
-            ],
+            "chat": list_chat_model_options(settings),
+            "embedding": list_embedding_model_options(settings),
         },
     )

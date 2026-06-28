@@ -363,6 +363,7 @@ h4 {
 .analysis-form,
 .suggest-form,
 .manual-gap,
+.research-plan-form,
 .note-form {
   display: grid;
   gap: 8px;
@@ -376,6 +377,7 @@ h4 {
 .analysis-form label,
 .suggest-form label,
 .manual-gap label,
+.research-plan-form label,
 .citation-toolbar label {
   color: #263442;
   font-weight: 700;
@@ -763,6 +765,60 @@ textarea {
   padding-top: 10px;
 }
 
+.agent-grid {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
+.agent-step-list,
+.research-card-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+}
+
+.agent-step-list {
+  list-style-position: inside;
+}
+
+.agent-step-list li,
+.research-card {
+  background: #f7fafc;
+  border: 1px solid #e5e9ee;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.agent-step-list p,
+.agent-step-list small,
+.agent-step-list em,
+.research-card p {
+  display: block;
+  line-height: 1.6;
+  margin: 6px 0 0;
+}
+
+.agent-step-list small,
+.agent-step-list em {
+  color: #607080;
+}
+
+.research-card h3 {
+  margin-bottom: 12px;
+}
+
+.research-card h4 {
+  margin: 12px 0 6px;
+}
+
+.research-card ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     padding: 18px;
@@ -781,7 +837,8 @@ textarea {
   .citation-grid,
   .knowledge-grid,
   .search-form,
-  .result-columns {
+  .result-columns,
+  .agent-grid {
     grid-template-columns: 1fr;
   }
 

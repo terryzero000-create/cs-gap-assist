@@ -7,6 +7,7 @@ import {
   listExperimentHistory,
   listGapHistory,
   listPapers,
+  runResearchPlanAgent,
   suggestExperiments,
   uploadPaper,
 } from './api/client';
@@ -20,12 +21,14 @@ import type {
   CitationGraphResponse,
   ExperimentPlan,
   GapItem,
+  PaperRecord,
   PaperUploadResponse,
   ReadingQAHistoryItem,
   ReadingQAResponse,
+  ResearchPlanAgentResponse,
 } from './types';
 
-type ModuleKey = 'reading' | 'gaps' | 'experiments' | 'citations' | 'knowledge';
+type ModuleKey = 'reading' | 'gaps' | 'experiments' | 'research-plan' | 'citations' | 'knowledge';
 
 interface UploadedPaper extends PaperUploadResponse {
   selected: boolean;
@@ -39,6 +42,7 @@ const modules: { key: ModuleKey; label: string }[] = [
   { key: 'reading', label: 'Reading QA' },
   { key: 'gaps', label: 'Research Gap' },
   { key: 'experiments', label: 'Experiment Suggest' },
+  { key: 'research-plan', label: 'Research Plan Agent' },
   { key: 'citations', label: 'Citation Graph' },
   { key: 'knowledge', label: 'Knowledge Base' },
 ];
@@ -104,6 +108,15 @@ export function App() {
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
 
+  const [planPapers, setPlanPapers] = useState<PaperRecord[]>([]);
+  const [selectedPlanDocIds, setSelectedPlanDocIds] = useState<string[]>([]);
+  const [researchDirection, setResearchDirection] = useState('');
+  const [currentExperimentResult, setCurrentExperimentResult] = useState('');
+  const [researchPlanResult, setResearchPlanResult] = useState<ResearchPlanAgentResponse | null>(null);
+  const [researchPlanError, setResearchPlanError] = useState<string | null>(null);
+  const [isLoadingPlanPapers, setIsLoadingPlanPapers] = useState(false);
+  const [isRunningResearchPlan, setIsRunningResearchPlan] = useState(false);
+
   const [citationKeyword, setCitationKeyword] = useState('retrieval augmented generation');
   const [citationMaxNodes, setCitationMaxNodes] = useState(15);
   const [citationGraph, setCitationGraph] = useState<CitationGraphResponse | null>(null);
@@ -115,6 +128,7 @@ export function App() {
   const selectedGap = useMemo(() => gaps.find((gap) => gap.gap_id === selectedGapId), [gaps, selectedGapId]);
   const activeGapId = selectedGap?.gap_id ?? manualGapId.trim();
   const canSuggest = activeGapId.length > 0 && !isSuggesting;
+  const canRunResearchPlan = researchDirection.trim().length > 0 && selectedPlanDocIds.length > 0 && !isRunningResearchPlan;
   const keyCitationNodes = useMemo(
     () => (citationGraph?.nodes ?? []).filter((node) => node.is_key).slice(0, 5),
     [citationGraph],
@@ -127,6 +141,7 @@ export function App() {
   useEffect(() => {
     void loadGapPapers();
     void loadGapHistory();
+    void loadPlanPapers();
   }, []);
 
   useEffect(() => {
@@ -318,6 +333,46 @@ export function App() {
     setManualGapId(value);
     if (value.trim()) {
       setSelectedGapId('');
+    }
+  }
+
+  async function loadPlanPapers(): Promise<void> {
+    setIsLoadingPlanPapers(true);
+    setResearchPlanError(null);
+    try {
+      const result = await listPapers();
+      setPlanPapers(result.papers);
+      setSelectedPlanDocIds((current) => (current.length > 0 ? current : result.papers.map((paper) => paper.doc_id)));
+    } catch (caught) {
+      setResearchPlanError(caught instanceof Error ? caught.message : 'Could not load papers');
+    } finally {
+      setIsLoadingPlanPapers(false);
+    }
+  }
+
+  function togglePlanPaper(docId: string): void {
+    setSelectedPlanDocIds((current) => (current.includes(docId) ? current.filter((item) => item !== docId) : [...current, docId]));
+  }
+
+  async function handleRunResearchPlan(): Promise<void> {
+    if (!canRunResearchPlan) {
+      return;
+    }
+    setIsRunningResearchPlan(true);
+    setResearchPlanError(null);
+    setResearchPlanResult(null);
+    try {
+      setResearchPlanResult(
+        await runResearchPlanAgent({
+          research_direction: researchDirection.trim(),
+          selected_paper_ids: selectedPlanDocIds,
+          experiment_result: currentExperimentResult.trim() || null,
+        }),
+      );
+    } catch (caught) {
+      setResearchPlanError(caught instanceof Error ? caught.message : 'Could not run research plan agent');
+    } finally {
+      setIsRunningResearchPlan(false);
     }
   }
 
@@ -563,6 +618,119 @@ export function App() {
               ) : (
                 plans.map((plan) => <ExperimentPlanCard key={plan.experiment_id} plan={plan} />)
               )}
+            </div>
+          </section>
+        </section>
+      ) : null}
+
+      {activeModule === 'research-plan' ? (
+        <section className="workspace" aria-label="Research plan agent">
+          <aside className="sidebar">
+            <div className="panel-header">
+              <h2>Selected papers</h2>
+              <button className="secondary-button" type="button" onClick={() => void loadPlanPapers()} disabled={isLoadingPlanPapers}>
+                {isLoadingPlanPapers ? 'Loading' : 'Refresh'}
+              </button>
+            </div>
+            <div className="selection-actions">
+              <button className="secondary-button" type="button" onClick={() => setSelectedPlanDocIds(planPapers.map((paper) => paper.doc_id))}>
+                Select all
+              </button>
+              <button className="secondary-button" type="button" onClick={() => setSelectedPlanDocIds([])}>
+                Clear
+              </button>
+            </div>
+            <div className="paper-list">
+              {planPapers.length === 0 ? (
+                <p className="muted">No uploaded papers found.</p>
+              ) : (
+                planPapers.map((paper) => (
+                  <label className="paper-row" key={paper.doc_id}>
+                    <input type="checkbox" checked={selectedPlanDocIds.includes(paper.doc_id)} onChange={() => togglePlanPaper(paper.doc_id)} />
+                    <span>
+                      <strong>{paper.title}</strong>
+                      <small>{new Date(paper.created_at).toLocaleDateString()}</small>
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+          </aside>
+          <section className="analysis-panel" aria-label="Research route planning">
+            <div className="research-plan-form">
+              <label htmlFor="research-direction">Research direction</label>
+              <textarea
+                id="research-direction"
+                value={researchDirection}
+                onChange={(event) => setResearchDirection(event.target.value)}
+                placeholder="例如：面向生产漂移场景的 RAG 鲁棒性评估"
+              />
+              <label htmlFor="experiment-result">Current experiment result (optional)</label>
+              <textarea
+                id="experiment-result"
+                value={currentExperimentResult}
+                onChange={(event) => setCurrentExperimentResult(event.target.value)}
+                placeholder="例如：BM25 baseline 在跨领域测试集上 F1 明显下降"
+              />
+              <button type="button" onClick={() => void handleRunResearchPlan()} disabled={!canRunResearchPlan}>
+                {isRunningResearchPlan ? 'Running agent' : 'Run agent'}
+              </button>
+            </div>
+            {researchPlanError ? <p className="error-banner">{researchPlanError}</p> : null}
+            {researchPlanResult?.warnings.length ? (
+              <ul className="warning-list">
+                {researchPlanResult.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="agent-grid">
+              <section className="summary-panel">
+                <h2>Agent steps</h2>
+                {researchPlanResult ? (
+                  <ol className="agent-step-list">
+                    {researchPlanResult.agent_steps.map((step) => (
+                      <li key={step.step_index}>
+                        <strong>{step.step_index}. {step.tool_name}</strong>
+                        <p>{step.thought}</p>
+                        <small>{step.observation}</small>
+                        <em>{step.next_decision}</em>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p className="muted">Run the agent to see tool calls, observations, and decisions.</p>
+                )}
+              </section>
+              <section className="research-card-list">
+                <h2>课题执行卡</h2>
+                {researchPlanResult ? (
+                  researchPlanResult.final_cards.map((card) => (
+                    <article className="research-card" key={card.title}>
+                      <h3>{card.title}</h3>
+                      <p><strong>研究背景：</strong>{card.background}</p>
+                      <p><strong>Research Gap：</strong>{card.research_gap}</p>
+                      <p><strong>可行切入点：</strong>{card.entry_point}</p>
+                      <p><strong>实验建议：</strong>{card.experiment_suggestion}</p>
+                      <p><strong>下一步行动：</strong>{card.next_action}</p>
+                      <h4>推荐阅读论文</h4>
+                      <ul>
+                        {card.recommended_papers.map((paper) => (
+                          <li key={paper}>{paper}</li>
+                        ))}
+                      </ul>
+                      <h4>风险提示</h4>
+                      <ul>
+                        {card.risks.map((risk) => (
+                          <li key={risk}>{risk}</li>
+                        ))}
+                      </ul>
+                    </article>
+                  ))
+                ) : (
+                  <p className="muted">Research cards will appear here.</p>
+                )}
+              </section>
             </div>
           </section>
         </section>

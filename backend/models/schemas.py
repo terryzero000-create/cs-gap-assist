@@ -177,6 +177,47 @@ class ExperimentSuggestResponse(WarningMixin):
     experiments: list[ExperimentPlan]
 
 
+class ResearchPlanAgentRequest(BaseModel):
+    """Request for the research planning agent."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    research_direction: str = Field(min_length=1)
+    selected_paper_ids: list[str] = Field(min_length=1)
+    experiment_result: str | None = None
+    runtime_model_config: ModelConfig | None = Field(default=None, alias="model_config")
+
+
+class ResearchPlanAgentStep(BaseModel):
+    """One bounded tool call in the research planning agent trace."""
+
+    step_index: int
+    tool_name: str
+    thought: str
+    observation: str
+    next_decision: str
+
+
+class ResearchPlanCard(BaseModel):
+    """A compact research execution card."""
+
+    title: str
+    background: str
+    research_gap: str
+    entry_point: str
+    experiment_suggestion: str
+    recommended_papers: list[str]
+    risks: list[str]
+    next_action: str
+
+
+class ResearchPlanAgentResponse(WarningMixin):
+    """Research planning agent trace and final execution cards."""
+
+    agent_steps: list[ResearchPlanAgentStep]
+    final_cards: list[ResearchPlanCard]
+
+
 class CitationNode(BaseModel):
     """D3-compatible citation graph node."""
 

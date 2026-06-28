@@ -95,6 +95,38 @@ export interface ExperimentSuggestResponse {
   warnings: string[];
 }
 
+export interface ResearchPlanAgentRequest {
+  research_direction: string;
+  selected_paper_ids: string[];
+  experiment_result?: string | null;
+  model_config?: ModelConfig;
+}
+
+export interface ResearchPlanAgentStep {
+  step_index: number;
+  tool_name: string;
+  thought: string;
+  observation: string;
+  next_decision: string;
+}
+
+export interface ResearchPlanCard {
+  title: string;
+  background: string;
+  research_gap: string;
+  entry_point: string;
+  experiment_suggestion: string;
+  recommended_papers: string[];
+  risks: string[];
+  next_action: string;
+}
+
+export interface ResearchPlanAgentResponse {
+  agent_steps: ResearchPlanAgentStep[];
+  final_cards: ResearchPlanCard[];
+  warnings: string[];
+}
+
 export interface CitationNode {
   id: string;
   title: string;

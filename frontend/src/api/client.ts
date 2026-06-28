@@ -11,6 +11,8 @@ import type {
   PaperRecord,
   PaperUploadResponse,
   ReadingQAResponse,
+  ResearchPlanAgentRequest,
+  ResearchPlanAgentResponse,
 } from '../types';
 
 const API_PREFIX = '/api/v1';
@@ -69,6 +71,16 @@ export async function suggestExperiments(gapId: string, topic?: string, modelCon
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ gap_id: gapId, topic, model_config: modelConfig }),
+    }),
+  );
+}
+
+export async function runResearchPlanAgent(request: ResearchPlanAgentRequest): Promise<ResearchPlanAgentResponse> {
+  return parseResponse<ResearchPlanAgentResponse>(
+    await fetch(`${API_PREFIX}/research-plan-agent/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
     }),
   );
 }

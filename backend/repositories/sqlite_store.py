@@ -110,6 +110,22 @@ class SQLiteStore:
             rows = conn.execute("SELECT * FROM papers ORDER BY created_at DESC").fetchall()
         return [self._paper_from_row(row) for row in rows]
 
+    def list_chunks(self, doc_ids: list[str] | None = None) -> list[PaperChunk]:
+        """Return stored paper chunks, optionally filtered by document ids."""
+        with self._connect() as conn:
+            if doc_ids:
+                placeholders = ",".join("?" for _ in doc_ids)
+                rows = conn.execute(
+                    f"SELECT * FROM chunks WHERE doc_id IN ({placeholders}) ORDER BY doc_id, page",
+                    doc_ids,
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM chunks ORDER BY doc_id, page").fetchall()
+        return [
+            PaperChunk(chunk_id=row["chunk_id"], doc_id=row["doc_id"], page=row["page"], text=row["text"])
+            for row in rows
+        ]
+
     def save_gap(self, gap: GapItem) -> GapItem:
         """Persist a research gap result."""
         with self._connect() as conn:

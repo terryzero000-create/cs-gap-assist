@@ -1,9 +1,18 @@
-﻿from fastapi.testclient import TestClient
+import pytest
+from fastapi.testclient import TestClient
 
 from backend.core.config import get_settings
 from backend.main import app
 from backend.models.schemas import ExperimentPlan, GapItem
 from backend.repositories.sqlite_store import SQLiteStore
+
+
+@pytest.fixture(autouse=True)
+def isolated_sqlite(monkeypatch, tmp_path):
+    monkeypatch.setenv("SQLITE_URL", str(tmp_path / "knowledge.db"))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def test_knowledge_base_lists_papers_and_manages_notes() -> None:

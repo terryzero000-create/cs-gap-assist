@@ -22,11 +22,13 @@ async def analyze_research_gaps(request: GapAnalysisRequest, settings: Settings)
     external_context = "\n".join(f"{paper.paper_id}: {paper.title}. {paper.abstract}" for paper in evidence_pool)
     prompt = (
         "GAP_JSON\n"
-        "Return strict JSON with a gaps array. Each gap needs title, value_level "
-        "('high' or 'mid'), description, and evidence_papers.\n"
-        f"Research topic: {request.topic}\n"
-        f"Uploaded paper context: {local_context}\n"
-        f"External literature context: {external_context}"
+        "返回严格 JSON，顶层必须是 gaps 数组。JSON 字段名保持英文：title, value_level, description, evidence_papers。"
+        "value_level 只能是 high 或 mid。"
+        "所有字段值必须使用简体中文；专业术语可以保留英文，并在必要时附中文解释。"
+        "请不要编造论文，evidence_papers 只能引用已给出的论文 id 或标题。\n"
+        f"研究方向：{request.topic}\n"
+        f"已上传论文上下文：{local_context}\n"
+        f"外部文献上下文：{external_context}"
     )
     selected = request.runtime_model_config
     provider = get_chat_provider(settings, selected.chat_provider if selected else None)
@@ -118,8 +120,8 @@ def _fallback_evidence(evidence_pool: list[ExternalPaper]) -> list[str]:
 def _fallback_gap(topic: str, evidence_pool: list[ExternalPaper]) -> GapItem:
     """Create a deterministic gap when model output cannot be repaired."""
     return GapItem(
-        title=f"Evidence coverage for {topic} remains incomplete",
+        title=f"{topic} 的证据覆盖仍不完整",
         value_level="mid",
-        description="The available local and external literature suggests unresolved evaluation, robustness, or reproducibility questions.",
+        description="现有本地论文和外部文献显示，该方向仍存在评估、鲁棒性或可复现性方面的未解决问题。",
         evidence_papers=_fallback_evidence(evidence_pool),
     )

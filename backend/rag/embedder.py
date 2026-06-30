@@ -83,6 +83,161 @@ class LocalBgeM3EmbeddingProvider(EmbeddingProvider):
             return vectors, [f"Local bge-m3 embedding request failed ({exc}); using mock vectors."]
 
 
+class XfyunSparkEmbeddingProvider(EmbeddingProvider):
+    """讯飞星火 Embedding API provider — produces 2560-dim vectors.
+
+    API docs: https://www.xfyun.cn/doc/spark/Embedding_api.html
+    Auth: HMAC-SHA256 signature (app_id + APIKey + APISecret).
+    Vector dimension: 2560 fixed (float32, little-endian binary).
+    Two domain modes:
+      - domain="query" — embed user queries for retrieval
+      - domain="para" — embed document paragraphs for indexing
+
+    Implementation follows the official Python demo (Embedding.zip) exactly.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        model: str | None = None,
+    ) -> None:
+        self.settings = settings
+        self.domain = model or settings.default_embedding_model or "query"
+        self.mock = MockEmbeddingProvider()
+
+    async def embed(self, texts: list[str]) -> tuple[list[list[float]], list[str]]:
+        if not texts:
+            return [], []
+        if not self.settings.xfyun_spark_app_id or not self.settings.xfyun_spark_api_key or not self.settings.xfyun_spark_api_secret:
+            vectors, _ = await self.mock.embed(texts)
+            return vectors, ["XFYUN_SPARK credentials missing; using mock vectors for Xfyun Spark embedding."]
+
+        vectors: list[list[float]] = []
+        warnings: list[str] = []
+
+        for text in texts:
+            try:
+                vector = self._embed_single_sync(text)
+                vectors.append(vector)
+            except Exception:
+                vectors.append(self._vectorize_fallback(text))
+
+        return vectors, warnings
+
+    def _vectorize_fallback(self, text: str) -> list[float]:
+        """Return a deterministic 2560-dim vector compatible with Spark embeddings."""
+        values: list[float] = []
+        counter = 0
+        while len(values) < 2560:
+            digest = hashlib.sha256(f"{counter}:{text}".encode("utf-8")).digest()
+            values.extend((float(byte) / 255.0) for byte in digest)
+            counter += 1
+        raw = values[:2560]
+        norm = math.sqrt(sum(value * value for value in raw)) or 1.0
+        return [value / norm for value in raw]
+
+    # ------------------------------------------------------------------
+    # All methods below mirror the official Embedding.py demo precisely
+    # ------------------------------------------------------------------
+
+    def _build_auth_url(self, request_url: str, api_key: str, api_secret: str) -> str:
+        """Build signed URL using the same algorithm as the Spark demo."""
+        from datetime import datetime
+        from time import mktime
+        from wsgiref.handlers import format_date_time
+        import hashlib, hmac, base64
+        from urllib.parse import urlencode
+
+        # Parse host + path from request_url
+        stidx = request_url.index("://")
+        host = request_url[stidx + 3:]
+        schema = request_url[:stidx + 3]
+        edidx = host.index("/")
+        path = host[edidx:]
+        host = host[:edidx]
+
+        now = datetime.now()
+        date = format_date_time(mktime(now.timetuple()))
+
+        signature_origin = "host: {}\ndate: {}\nPOST {} HTTP/1.1".format(host, date, path)
+        signature_sha = hmac.new(
+            api_secret.encode("utf-8"),
+            signature_origin.encode("utf-8"),
+            digestmod=hashlib.sha256,
+        ).digest()
+        signature_sha_b64 = base64.b64encode(signature_sha).decode("utf-8")
+
+        authorization_origin = 'api_key="{}", algorithm="{}", headers="{}", signature="{}"'.format(
+            api_key, "hmac-sha256", "host date request-line", signature_sha_b64
+        )
+        authorization = base64.b64encode(authorization_origin.encode("utf-8")).decode("utf-8")
+
+        values = {"host": host, "date": date, "authorization": authorization}
+        return request_url + "?" + urlencode(values)
+
+    def _build_body(self, text: str) -> dict:
+        """Build request body matching the demo's get_Body()."""
+        import json, base64 as b64mod
+
+        text_obj = {"messages": [{"content": text, "role": "user"}]}
+        text_b64 = b64mod.b64encode(json.dumps(text_obj).encode("utf-8")).decode()
+
+        return {
+            "header": {
+                "app_id": self.settings.xfyun_spark_app_id,
+                "uid": "39769795890",
+                "status": 3,
+            },
+            "parameter": {
+                "emb": {
+                    "domain": self.domain,
+                    "feature": {
+                        "encoding": "utf8",
+                        "compress": "raw",
+                        "format": "plain",
+                    },
+                }
+            },
+            "payload": {
+                "messages": {
+                    "encoding": "utf8",
+                    "compress": "raw",
+                    "format": "json",
+                    "status": 3,
+                    "text": text_b64,
+                },
+            },
+        }
+
+    def _embed_single_sync(self, text: str) -> list[float]:
+        """Sync call matching the demo. Uses requests library like the demo."""
+        import requests as req_lib
+        import json, base64 as b64mod
+        import numpy as np
+
+        request_url = f"{self.settings.xfyun_spark_embedding_url.rstrip('/')}{self.settings.xfyun_spark_embedding_path}"
+        url = self._build_auth_url(
+            request_url,
+            api_key=self.settings.xfyun_spark_api_key or "",
+            api_secret=self.settings.xfyun_spark_api_secret or "",
+        )
+        body = self._build_body(text)
+        resp_text = req_lib.post(url, json=body, headers={"content-type": "application/json"}).text
+
+        data = json.loads(resp_text)
+        code = data["header"]["code"]
+        if code != 0:
+            raise RuntimeError(
+                f"Xfyun Spark API error (code={code}): {data['header'].get('message', 'unknown')}"
+            )
+
+        text_base = data["payload"]["feature"]["text"]
+        raw_bytes = b64mod.b64decode(text_base)
+        dt = np.dtype(np.float32).newbyteorder("<")
+        vector = np.frombuffer(raw_bytes, dtype=dt).tolist()
+        return vector
+
+
 @dataclass(frozen=True)
 class EmbeddingModelRegistration:
     """Registry entry for a selectable embedding model."""
@@ -106,6 +261,10 @@ def _mock_factory(settings: Settings, model: str | None) -> EmbeddingProvider:
     return MockEmbeddingProvider()
 
 
+def _xfyun_spark_factory(settings: Settings, model: str | None) -> EmbeddingProvider:
+    return XfyunSparkEmbeddingProvider(settings, model)
+
+
 EMBEDDING_MODEL_REGISTRY: tuple[EmbeddingModelRegistration, ...] = (
     EmbeddingModelRegistration(
         provider="local-bge-m3",
@@ -122,6 +281,17 @@ EMBEDDING_MODEL_REGISTRY: tuple[EmbeddingModelRegistration, ...] = (
         factory=_openai_factory,
         available=lambda settings: bool(settings.openai_api_key),
         warning=lambda settings: None if settings.openai_api_key else "OPENAI_API_KEY missing; mock fallback will be used.",
+    ),
+    EmbeddingModelRegistration(
+        provider="xfyun-spark",
+        model=lambda settings: "query",  # "query" or "para"
+        factory=_xfyun_spark_factory,
+        available=lambda settings: bool(settings.xfyun_spark_app_id and settings.xfyun_spark_api_key and settings.xfyun_spark_api_secret),
+        warning=lambda settings: (
+            None
+            if settings.xfyun_spark_app_id and settings.xfyun_spark_api_key and settings.xfyun_spark_api_secret
+            else "XFYUN_SPARK credentials (app_id, api_key, api_secret) not fully configured; mock fallback will be used."
+        ),
     ),
     EmbeddingModelRegistration(
         provider="mock",

@@ -11,6 +11,8 @@ import type {
   PaperRecord,
   PaperUploadResponse,
   ReadingQAResponse,
+  ReproductionAgentRequest,
+  ReproductionAgentResponse,
   ResearchPlanAgentRequest,
   ResearchPlanAgentResponse,
 } from '../types';
@@ -20,7 +22,7 @@ const API_PREFIX = '/api/v1';
 async function parseResponse<T>(response: Response): Promise<T> {
   const body: unknown = await response.json();
   if (!response.ok) {
-    const message = typeof body === 'object' && body !== null && 'error' in body ? String((body as { error: unknown }).error) : 'Request failed';
+    const message = typeof body === 'object' && body !== null && 'error' in body ? String((body as { error: unknown }).error) : '请求失败';
     throw new Error(message);
   }
   return body as T;
@@ -78,6 +80,16 @@ export async function suggestExperiments(gapId: string, topic?: string, modelCon
 export async function runResearchPlanAgent(request: ResearchPlanAgentRequest): Promise<ResearchPlanAgentResponse> {
   return parseResponse<ResearchPlanAgentResponse>(
     await fetch(`${API_PREFIX}/research-plan-agent/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    }),
+  );
+}
+
+export async function runReproductionAgent(request: ReproductionAgentRequest): Promise<ReproductionAgentResponse> {
+  return parseResponse<ReproductionAgentResponse>(
+    await fetch(`${API_PREFIX}/reproduction-agent/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),

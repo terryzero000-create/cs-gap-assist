@@ -93,11 +93,10 @@ h4 {
 .plan-toolbar,
 .citation-toolbar,
 .stat-row,
-.knowledge-toolbar,
 .search-form,
-.upload-form,
 .checkline,
 .record-head,
+.record-actions,
 .inline-edit {
   align-items: center;
   display: flex;
@@ -364,6 +363,7 @@ h4 {
 .suggest-form,
 .manual-gap,
 .research-plan-form,
+.reproduction-form,
 .note-form {
   display: grid;
   gap: 8px;
@@ -378,6 +378,7 @@ h4 {
 .suggest-form label,
 .manual-gap label,
 .research-plan-form label,
+.reproduction-form label,
 .citation-toolbar label {
   color: #263442;
   font-weight: 700;
@@ -388,6 +389,7 @@ textarea,
 .manual-gap input,
 .citation-toolbar input,
 .citation-toolbar select,
+.reproduction-form select,
 .search-form input,
 .search-form select,
 .upload-form input,
@@ -587,11 +589,45 @@ textarea {
   padding: 16px;
 }
 
+.route-list,
+.route-card,
+.route-experiment {
+  display: grid;
+  gap: 14px;
+}
+
+.route-card {
+  background: #ffffff;
+  border: 1px solid #d9e0e6;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.route-card-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.route-card p,
+.route-experiment p {
+  color: #334454;
+  line-height: 1.6;
+  margin-bottom: 0;
+}
+
+.route-experiment {
+  border-top: 1px solid #e5e9ee;
+  padding-top: 14px;
+}
+
 .plan-card h3 {
   margin: 0;
 }
 
-.plan-card h4 {
+.plan-card h4,
+.route-experiment h4 {
   margin: 0 0 8px;
 }
 
@@ -681,19 +717,60 @@ textarea {
   font-size: 24px;
 }
 
-.knowledge-toolbar {
-  align-items: stretch;
-  display: grid;
-  gap: 12px;
-}
-
 .search-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 180px auto auto;
 }
 
+.knowledge-toolbar {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(0, 1.15fr);
+}
+
 .upload-form {
-  justify-content: end;
+  align-items: stretch;
+  display: grid;
+  gap: 10px;
+}
+
+.file-input-hidden {
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  position: absolute;
+  width: 1px;
+}
+
+.upload-dropzone {
+  align-items: center;
+  background: #f7fafc;
+  border: 2px dashed #9fb0bd;
+  border-radius: 8px;
+  color: #263442;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  min-height: 120px;
+  padding: 22px;
+  text-align: center;
+}
+
+.upload-dropzone:hover,
+.upload-dropzone:focus-within {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+}
+
+.upload-dropzone span {
+  color: #607080;
+  overflow-wrap: anywhere;
+}
+
+.upload-picker {
+  margin: 0;
+  width: 100%;
 }
 
 .checkline {
@@ -708,7 +785,7 @@ textarea {
 .knowledge-grid {
   display: grid;
   gap: 16px;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr) 360px;
 }
 
 .paper-library,
@@ -730,6 +807,11 @@ textarea {
 .record-card {
   display: grid;
   gap: 12px;
+}
+
+.record-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .record-card h3,
@@ -817,6 +899,28 @@ textarea {
 .research-card ul {
   margin: 0;
   padding-left: 18px;
+}
+
+.report-sections {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.report-sections h3 {
+  font-size: 15px;
+  margin: 0 0 6px;
+}
+
+.report-sections pre {
+  background: #eef2f6;
+  border: 1px solid #dbe3ea;
+  border-radius: 8px;
+  line-height: 1.6;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
 }
 
 @media (max-width: 900px) {

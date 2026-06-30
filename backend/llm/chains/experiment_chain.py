@@ -20,9 +20,11 @@ async def suggest_experiments(request: ExperimentSuggestRequest, settings: Setti
     selected = request.runtime_model_config
     prompt = (
         "EXPERIMENT_JSON\n"
-        "Return strict JSON with an experiments array. Each experiment needs objective, datasets, metrics, baselines, steps, and risks.\n"
-        f"Gap or topic: {query}\n"
-        "External literature context:\n"
+        "返回严格 JSON，顶层必须是 experiments 数组。JSON 字段名保持英文：objective, datasets, metrics, baselines, steps, risks。"
+        "所有字段值必须使用简体中文；专业术语、数据集名、指标名和方法名可以保留英文。"
+        "steps 和 risks 的每一项都要是中文短句。请不要编造不存在的数据集或论文。\n"
+        f"研究空白或主题：{query}\n"
+        "外部文献上下文：\n"
         + "\n".join(f"{paper.paper_id}: {paper.title}. {paper.abstract}" for paper in papers)
     )
     provider = get_chat_provider(settings, selected.chat_provider if selected else None)
@@ -136,11 +138,11 @@ def _fallback_experiment(gap_id: str, support_papers: list[str], query: str) -> 
     """Create a deterministic experiment plan when model output cannot be repaired."""
     return ExperimentPlan(
         gap_id=gap_id,
-        objective=f"Evaluate experimental evidence for {query}.",
-        datasets=["Public benchmark dataset", "arXiv-derived paper subset"],
+        objective=f"评估 {query} 的实验证据充分性。",
+        datasets=["公开基准数据集", "arXiv 文献派生子集"],
         metrics=["Accuracy", "F1", "NDCG"],
-        baselines=["BM25", "standard RAG", "RAG without reranking"],
-        steps=["Prepare evaluation splits", "Run baseline systems", "Compare metrics", "Analyze failure cases"],
-        risks=["External evidence may be incomplete", "Dataset labels may be noisy"],
+        baselines=["BM25", "标准 RAG", "不使用 reranking 的 RAG"],
+        steps=["准备评估划分", "运行基线系统", "比较核心指标", "分析失败案例"],
+        risks=["外部证据可能不完整", "数据集标签可能存在噪声"],
         support_papers=_support_papers(support_papers),
     )

@@ -1,0 +1,64 @@
+import asyncio
+import json
+
+import httpx
+
+from backend.core.config import Settings
+from backend.rag.embedder import LocalBgeM3EmbeddingProvider, XfyunSparkEmbeddingProvider, get_embedding_provider
+
+
+def test_local_bge_m3_provider_parses_ollama_embed_response() -> None:
+    """Local bge-m3 embeddings use Ollama's batch /api/embed response."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == "http://127.0.0.1:11434/api/embed"
+        payload = json.loads(request.read().decode("utf-8"))
+        assert payload == {"model": "bge-m3", "input": ["first chunk", "second chunk"]}
+        return httpx.Response(200, json={"embeddings": [[0.1, 0.2], [0.3, 0.4]]})
+
+    provider = LocalBgeM3EmbeddingProvider(
+        Settings(default_embedding_provider="local-bge-m3"),
+        transport=httpx.MockTransport(handler),
+    )
+
+    vectors, warnings = asyncio.run(provider.embed(["first chunk", "second chunk"]))
+
+    assert vectors == [[0.1, 0.2], [0.3, 0.4]]
+    assert warnings == []
+
+
+def test_get_embedding_provider_resolves_local_bge_m3() -> None:
+    """The embedding provider registry exposes local bge-m3 for development."""
+    provider = get_embedding_provider(Settings(default_embedding_provider="local-bge-m3"))
+
+    assert isinstance(provider, LocalBgeM3EmbeddingProvider)
+
+
+def test_xfyun_spark_provider_silently_falls_back_to_2560_dim_vector_on_api_error(monkeypatch) -> None:
+    """Spark embedding failures should remain recoverable without surfacing raw provider errors."""
+    provider = XfyunSparkEmbeddingProvider(
+        Settings(
+            xfyun_spark_app_id="app",
+            xfyun_spark_api_key="key",
+            xfyun_spark_api_secret="secret",
+        )
+    )
+
+    monkeypatch.setattr(
+        provider,
+        "_embed_single_sync",
+        lambda text: (_ for _ in ()).throw(RuntimeError("Xfyun Spark API error (code=11202): licc failed")),
+    )
+
+    vectors, warnings = asyncio.run(provider.embed(["paper chunk"]))
+
+    assert len(vectors) == 1
+    assert len(vectors[0]) == 2560
+    assert warnings == []
+
+
+def test_xfyun_spark_provider_uses_configured_default_domain() -> None:
+    """Spark embedding should respect DEFAULT_EMBEDDING_MODEL when no runtime model is supplied."""
+    provider = XfyunSparkEmbeddingProvider(Settings(default_embedding_model="para"))
+
+    assert provider.domain == "para"

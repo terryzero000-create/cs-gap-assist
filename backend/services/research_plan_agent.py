@@ -14,6 +14,7 @@ from backend.models.schemas import (
     ResearchPlanAgentResponse,
     ResearchPlanAgentStep,
     ResearchPlanCard,
+    ResearchPlanRoute,
 )
 from backend.rag.vector_store import vector_store
 from backend.repositories.sqlite_store import SQLiteStore
@@ -37,6 +38,7 @@ class ResearchPlanState:
     recommended_papers: list[str] = field(default_factory=list)
     agent_steps: list[ResearchPlanAgentStep] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    routes: list[ResearchPlanRoute] = field(default_factory=list)
     final_cards: list[ResearchPlanCard] = field(default_factory=list)
 
 
@@ -79,7 +81,7 @@ class ResearchPlanAgentService:
         if not state.final_cards:
             state.warnings.append("Agent reached max_steps before report generation; returning partial cards.")
             await self.research_report_tool(state)
-        return ResearchPlanAgentResponse(agent_steps=state.agent_steps, final_cards=state.final_cards, warnings=state.warnings)
+        return ResearchPlanAgentResponse(agent_steps=state.agent_steps, routes=state.routes, final_cards=state.final_cards, warnings=state.warnings)
 
     def decide_next_tool(self, state: ResearchPlanState) -> str:
         """Choose the next tool from state, not from a blind fixed pipeline."""
@@ -186,6 +188,13 @@ class ResearchPlanAgentService:
 
     async def research_report_tool(self, state: ResearchPlanState) -> str:
         cards: list[ResearchPlanCard] = []
+        state.routes = [
+            ResearchPlanRoute(
+                gap=gap,
+                experiments=[plan for plan in state.experiment_suggestions if plan.gap_id == gap.gap_id],
+            )
+            for gap in state.top_gaps
+        ]
         for gap in state.top_gaps:
             plan = next((item for item in state.experiment_suggestions if item.gap_id == gap.gap_id), None)
             cards.append(

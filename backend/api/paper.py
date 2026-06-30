@@ -32,7 +32,8 @@ async def upload_paper(file: UploadFile = File(...)) -> PaperUploadResponse:
     doc_id = str(uuid4())
     parsed_chunks = PdfParser().parse(content, file.filename)
     chunks = [PaperChunk(chunk_id=item.chunk_id, doc_id=doc_id, page=item.page, text=item.text) for item in parsed_chunks]
-    embeddings, warnings = await get_embedding_provider(settings).embed([chunk.text for chunk in chunks])
+    document_embedding_model = "para" if settings.default_embedding_provider == "xfyun-spark" else None
+    embeddings, warnings = await get_embedding_provider(settings, model=document_embedding_model).embed([chunk.text for chunk in chunks])
     vector_store.add_chunks(chunks, embeddings)
     SQLiteStore(settings.sqlite_path).add_paper(doc_id, file.filename, chunks)
     return PaperUploadResponse(doc_id=doc_id, title=file.filename, chunk_count=len(chunks), warnings=warnings)

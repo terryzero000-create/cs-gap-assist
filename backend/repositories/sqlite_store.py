@@ -110,6 +110,12 @@ class SQLiteStore:
             rows = conn.execute("SELECT * FROM papers ORDER BY created_at DESC").fetchall()
         return [self._paper_from_row(row) for row in rows]
 
+    def get_paper(self, doc_id: str) -> PaperRecord | None:
+        """Return one stored paper by document id."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM papers WHERE doc_id = ?", (doc_id,)).fetchone()
+        return self._paper_from_row(row) if row else None
+
     def list_chunks(self, doc_ids: list[str] | None = None) -> list[PaperChunk]:
         """Return stored paper chunks, optionally filtered by document ids."""
         with self._connect() as conn:

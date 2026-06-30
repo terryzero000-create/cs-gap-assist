@@ -1,5 +1,7 @@
 ﻿from fastapi.testclient import TestClient
 
+from backend.api import paper as paper_api
+from backend.core.config import get_settings
 from backend.main import app
 
 
@@ -53,6 +55,38 @@ def test_paper_list_returns_uploaded_papers() -> None:
     assert response.status_code == 200
     body = response.json()
     assert any(paper["doc_id"] == doc_id and paper["title"] == "listed.pdf" for paper in body["papers"])
+
+
+def test_pdf_upload_uses_para_domain_for_xfyun_document_embeddings(monkeypatch, tmp_path) -> None:
+    captured_models: list[str | None] = []
+
+    class FakeEmbeddingProvider:
+        async def embed(self, texts: list[str]) -> tuple[list[list[float]], list[str]]:
+            return [[0.1] * 2560 for _ in texts], []
+
+    class FakeVectorStore:
+        def add_chunks(self, chunks, embeddings) -> None:
+            pass
+
+    def fake_get_embedding_provider(settings, provider=None, model=None):
+        captured_models.append(model)
+        return FakeEmbeddingProvider()
+
+    monkeypatch.setenv("SQLITE_URL", str(tmp_path / "papers.db"))
+    monkeypatch.setenv("DEFAULT_EMBEDDING_PROVIDER", "xfyun-spark")
+    get_settings.cache_clear()
+    monkeypatch.setattr(paper_api, "get_embedding_provider", fake_get_embedding_provider)
+    monkeypatch.setattr(paper_api, "vector_store", FakeVectorStore())
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/papers/upload",
+        files={"file": ("xfyun.pdf", b"Knowledge paragraph should use para embeddings.", "application/pdf")},
+    )
+
+    get_settings.cache_clear()
+    assert response.status_code == 200
+    assert captured_models == ["para"]
 
 
 def test_uniform_error_shape_for_bad_upload() -> None:

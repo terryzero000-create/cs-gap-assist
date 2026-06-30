@@ -1,6 +1,6 @@
 # Branch Handoff Guide
 
-Last updated: 2026-06-02
+Last updated: 2026-06-30
 
 ## How To Use This File
 
@@ -63,7 +63,7 @@ Expected baseline:
 
 Goal: first combined MVP application branch.
 
-Current status: integration MVP complete.
+Current status: integration MVP complete, with Research Plan Agent route-planning flow integrated into the main navigation.
 
 Created from:
 
@@ -79,18 +79,21 @@ Merged in order:
 
 Implemented:
 
-- Registers config, citation, experiment, gap, knowledge, paper, and reading routers in `backend/main.py`.
-- Preserves all shared schemas in `backend/models/schemas.py`, including Reading QA, Gap, Experiment, Citation Graph, and Knowledge Base contracts.
+- Registers config, citation, experiment, gap, knowledge, paper, reading, research plan agent, and reproduction agent routers in `backend/main.py`.
+- Preserves all shared schemas in `backend/models/schemas.py`, including Reading QA, Gap, Experiment, Research Plan Agent, Reproduction Lab, Citation Graph, and Knowledge Base contracts.
 - Preserves SQLite paper, gap, experiment, note, tag, and favorite storage.
 - Preserves vector filtering by `doc_id`, `tags`, and `module_source`.
 - Keeps Semantic Scholar disabled/unused.
 - Keeps Citation Graph OpenAlex expansion optional behind `ENABLE_OPENALEX=true` and `OPENALEX_API_KEY`, with deterministic fallback when unavailable.
 - Provides a unified frontend navigation with five tabs:
-  - Reading QA
-  - Research Gap
-  - Experiment Suggest
-  - Citation Graph
-  - Knowledge Base
+  - 论文问答
+  - 研究路线规划
+  - 复现实验室
+  - 引用图谱
+  - 知识库
+- Keeps Research Gap and Experiment Suggestion APIs available, but uses them as internal tools for the Research Plan Agent instead of exposing them as separate route-planning tabs.
+- Folds Research Routes into the Research Plan Agent result as `routes`, alongside `agent_steps` and `final_cards`.
+- Keeps Reproduction Lab as an independent module with its own `POST /api/v1/reproduction-agent/run` endpoint.
 - Rewrites the Knowledge Base panel text to clean English and keeps upload, search, note creation, tag editing, favorite toggling, and unified search.
 
 Verification on branch:
@@ -103,15 +106,17 @@ npm run build --prefix frontend
 
 Current verification:
 
-- Backend: `36 passed`
-- Frontend: `tsc --noEmit` passed
-- Frontend build passed
+- Frontend: `npm run build --prefix frontend` passed on 2026-06-30.
+- Backend focused verification on 2026-06-30: `8 passed, 1 failed` when run against local runtime Chroma data containing copied real 2560-dimensional paper vectors. The failing test uploads mock 16-dimensional vectors into the same persistent collection; clear or isolate `data/chroma` before treating this as a code regression.
 
 Known limitations:
 
 - The frontend is a unified MVP surface, not a polished production workflow.
 - Cross-module deep links are not implemented yet.
 - Real DeepSeek/OpenAI/OpenAlex behavior still needs API keys and integration testing.
+- Research Plan Agent uses a bounded local state machine rather than LangGraph.
+- Research routes are display-only in the MVP; route save/edit/history is not implemented yet.
+- Reproduction Lab is independent from route planning and does not run code.
 - Browser-level QA against a running backend/frontend pair is still a recommended next step.
 
 ## codex/reading-qa

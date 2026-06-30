@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 ValueLevel = Literal["high", "mid"]
+ReproductionMode = Literal["standard", "focused", "template"]
 
 
 class WarningMixin(BaseModel):
@@ -177,6 +178,64 @@ class ExperimentSuggestResponse(WarningMixin):
     experiments: list[ExperimentPlan]
 
 
+class ReproductionAgentRequest(BaseModel):
+    """Request for the reproduction lab agent."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    paper_id: str
+    mode: ReproductionMode = "standard"
+    user_requirement: str
+    runtime_model_config: ModelConfig | None = Field(default=None, alias="model_config")
+
+
+class ToolObservation(BaseModel):
+    """Observed result from a reproduction agent tool call."""
+
+    summary: str
+    evidence: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class AgentStep(BaseModel):
+    """Single tool call made by the reproduction agent."""
+
+    step_index: int
+    tool_name: str
+    thought: str
+    input_summary: str
+    observation: ToolObservation
+    next_decision: str
+
+
+class ReproductionReport(BaseModel):
+    """Structured assisted reproduction report."""
+
+    paper_id: str
+    mode: ReproductionMode
+    user_requirement: str
+    goal_understanding: str
+    available_evidence: list[str] = Field(default_factory=list)
+    reproduction_targets: list[str] = Field(default_factory=list)
+    datasets: list[str] = Field(default_factory=list)
+    metrics: list[str] = Field(default_factory=list)
+    baselines: list[str] = Field(default_factory=list)
+    formula_or_algorithm_notes: list[str] = Field(default_factory=list)
+    implementation_plan: list[str] = Field(default_factory=list)
+    code_template: str = ""
+    simulation_template: str = ""
+    risks: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    non_claims: list[str] = Field(default_factory=list)
+
+
+class ReproductionAgentResponse(WarningMixin):
+    """Reproduction agent trace and final structured report."""
+
+    agent_steps: list[AgentStep]
+    report: ReproductionReport
+
+
 class ResearchPlanAgentRequest(BaseModel):
     """Request for the research planning agent."""
 
@@ -211,10 +270,18 @@ class ResearchPlanCard(BaseModel):
     next_action: str
 
 
+class ResearchPlanRoute(BaseModel):
+    """A route-level pairing of a selected gap and its experiment plans."""
+
+    gap: GapItem
+    experiments: list[ExperimentPlan] = Field(default_factory=list)
+
+
 class ResearchPlanAgentResponse(WarningMixin):
     """Research planning agent trace and final execution cards."""
 
     agent_steps: list[ResearchPlanAgentStep]
+    routes: list[ResearchPlanRoute]
     final_cards: list[ResearchPlanCard]
 
 

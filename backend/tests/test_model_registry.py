@@ -27,9 +27,10 @@ def test_embedding_model_registry_lists_configured_options() -> None:
 
     options = list_embedding_model_options(settings)
 
-    assert [option.provider for option in options] == ["local-bge-m3", "openai", "mock"]
+    assert [option.provider for option in options] == ["local-bge-m3", "openai", "xfyun-spark", "mock"]
     assert any(option.provider == "local-bge-m3" and option.model == "bge-m3" for option in options)
     assert any(option.provider == "openai" and option.available is False for option in options)
+    assert any(option.provider == "xfyun-spark" and option.model == "query" for option in options)
 
 
 def test_get_chat_provider_resolves_registered_openai_provider() -> None:
@@ -55,14 +56,14 @@ def test_openai_compatible_chat_provider_posts_selected_model() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url == "https://api.example.test/chat/completions"
-        assert request.headers["Authorization"] == "Bearer sk-test"
+        assert request.headers["Authorization"] == "Bearer test-token"
         payload = json.loads(request.read().decode("utf-8"))
         assert payload == {"model": "runtime-model", "messages": [{"role": "user", "content": "hello"}]}
         return httpx.Response(200, json={"choices": [{"message": {"content": "world"}}]})
 
     provider = OpenAICompatibleChatProvider(
         provider_name="example",
-        api_key="sk-test",
+        api_key="test-token",
         base_url="https://api.example.test",
         default_model="default-model",
         transport=httpx.MockTransport(handler),

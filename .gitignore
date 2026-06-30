@@ -8,3 +8,4 @@ dist/
 .env
 *.egg-info/
 *.log
+.dev-pids.json

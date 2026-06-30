@@ -84,6 +84,9 @@ def test_research_plan_agent_returns_steps_and_cards(tmp_path, monkeypatch) -> N
         "research_report_tool",
     ]
     assert all(step["thought"] and step["observation"] and step["next_decision"] for step in body["agent_steps"])
+    assert body["routes"]
+    assert body["routes"][0]["gap"]["gap_id"]
+    assert body["routes"][0]["experiments"]
     card = body["final_cards"][0]
     assert card["title"]
     assert card["background"]

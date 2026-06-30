@@ -27,9 +27,10 @@ def test_embedding_model_registry_lists_configured_options() -> None:
 
     options = list_embedding_model_options(settings)
 
-    assert [option.provider for option in options] == ["local-bge-m3", "openai", "mock"]
+    assert [option.provider for option in options] == ["local-bge-m3", "openai", "xfyun-spark", "mock"]
     assert any(option.provider == "local-bge-m3" and option.model == "bge-m3" for option in options)
     assert any(option.provider == "openai" and option.available is False for option in options)
+    assert any(option.provider == "xfyun-spark" and option.model == "query" for option in options)
 
 
 def test_get_chat_provider_resolves_registered_openai_provider() -> None:

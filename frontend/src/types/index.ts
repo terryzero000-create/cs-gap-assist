@@ -95,6 +95,55 @@ export interface ExperimentSuggestResponse {
   warnings: string[];
 }
 
+export type ReproductionMode = 'standard' | 'focused' | 'template';
+
+export interface ReproductionAgentRequest {
+  paper_id: string;
+  mode: ReproductionMode;
+  user_requirement: string;
+  model_config?: ModelConfig;
+}
+
+export interface ReproductionToolObservation {
+  summary: string;
+  evidence: string[];
+  warnings: string[];
+}
+
+export interface ReproductionAgentStep {
+  step_index: number;
+  tool_name: string;
+  thought: string;
+  input_summary: string;
+  observation: ReproductionToolObservation;
+  next_decision: string;
+}
+
+export interface ReproductionReport {
+  paper_id: string;
+  mode: ReproductionMode;
+  user_requirement: string;
+  goal_understanding: string;
+  available_evidence: string[];
+  reproduction_targets: string[];
+  datasets: string[];
+  metrics: string[];
+  baselines: string[];
+  formula_or_algorithm_notes: string[];
+  implementation_plan: string[];
+  code_template: string;
+  simulation_template: string;
+  risks: string[];
+  limitations: string[];
+  non_claims: string[];
+}
+
+export interface ReproductionAgentResponse {
+  agent_steps: ReproductionAgentStep[];
+  report: ReproductionReport;
+  warnings: string[];
+}
+
 export interface ResearchPlanAgentRequest {
   research_direction: string;
   selected_paper_ids: string[];
@@ -121,8 +170,14 @@ export interface ResearchPlanCard {
   next_action: string;
 }
 
+export interface ResearchPlanRoute {
+  gap: GapItem;
+  experiments: ExperimentPlan[];
+}
+
 export interface ResearchPlanAgentResponse {
   agent_steps: ResearchPlanAgentStep[];
+  routes: ResearchPlanRoute[];
   final_cards: ResearchPlanCard[];
   warnings: string[];
 }

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { DragEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 
 import {
   createKnowledgeNote,
@@ -31,7 +31,7 @@ function parseTags(value: string): string[] {
 }
 
 function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium' }).format(new Date(value));
+  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(value));
 }
 
 function ResultGroup({ title, items }: { title: string; items: ResultItem[] }) {
@@ -46,13 +46,17 @@ function ResultGroup({ title, items }: { title: string; items: ResultItem[] }) {
           </article>
         ))
       ) : (
-        <p className="empty-state">No results yet.</p>
+        <p className="empty-state">暂无结果。</p>
       )}
     </div>
   );
 }
 
-export function KnowledgeBasePanel() {
+interface KnowledgeBasePanelProps {
+  onAskWithPaper: (docId: string) => void;
+}
+
+export function KnowledgeBasePanel({ onAskWithPaper }: KnowledgeBasePanelProps) {
   const [papers, setPapers] = useState<PaperRecord[]>([]);
   const [results, setResults] = useState<KnowledgeSearchResponse>(emptyResults);
   const [query, setQuery] = useState('');
@@ -64,7 +68,7 @@ export function KnowledgeBasePanel() {
   const [noteTags, setNoteTags] = useState('');
   const [relatedDocId, setRelatedDocId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [status, setStatus] = useState('Loading knowledge base...');
+  const [status, setStatus] = useState('正在加载知识库...');
   const [isBusy, setIsBusy] = useState(false);
 
   const availableTags = useMemo(() => Array.from(new Set(papers.flatMap((paper) => paper.tags))).sort(), [papers]);
@@ -90,6 +94,23 @@ export function KnowledgeBasePanel() {
     setResults(await searchKnowledge(nextQuery.trim(), tag || undefined, favoriteFilter));
   }
 
+  function chooseUploadFile(file: File | undefined): void {
+    if (!file) {
+      return;
+    }
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      setSelectedFile(null);
+      setStatus('请选择 PDF 文件。');
+      return;
+    }
+    setSelectedFile(file);
+  }
+
+  function handleDrop(event: DragEvent<HTMLLabelElement>): void {
+    event.preventDefault();
+    chooseUploadFile(event.dataTransfer.files[0]);
+  }
+
   useEffect(() => {
     let mounted = true;
     async function loadInitialState(): Promise<void> {
@@ -100,11 +121,11 @@ export function KnowledgeBasePanel() {
           setPapers(records);
           setResults(response);
           setTagDrafts(Object.fromEntries(records.map((paper) => [paper.doc_id, paper.tags.join(', ')])));
-          setStatus(records.length ? 'Knowledge base ready.' : 'Upload a paper to start.');
+          setStatus(records.length ? '知识库已就绪。' : '上传一篇论文开始。');
         }
       } catch (error) {
         if (mounted) {
-          setStatus(error instanceof Error ? error.message : 'Could not load knowledge base.');
+          setStatus(error instanceof Error ? error.message : '无法加载知识库。');
         }
       }
     }
@@ -120,9 +141,9 @@ export function KnowledgeBasePanel() {
     try {
       await refreshPapers();
       await runSearch();
-      setStatus('Search updated.');
+      setStatus('搜索结果已更新。');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Search failed.');
+      setStatus(error instanceof Error ? error.message : '搜索失败。');
     } finally {
       setIsBusy(false);
     }
@@ -131,7 +152,7 @@ export function KnowledgeBasePanel() {
   async function handleUpload(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!selectedFile) {
-      setStatus('Choose a PDF first.');
+      setStatus('请先选择 PDF。');
       return;
     }
     setIsBusy(true);
@@ -140,9 +161,9 @@ export function KnowledgeBasePanel() {
       await refreshPapers();
       await runSearch('');
       setSelectedFile(null);
-      setStatus(`Uploaded ${uploaded.title}.`);
+      setStatus(`已上传 ${uploaded.title}。`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Upload failed.');
+      setStatus(error instanceof Error ? error.message : '上传失败。');
     } finally {
       setIsBusy(false);
     }
@@ -155,11 +176,11 @@ export function KnowledgeBasePanel() {
         tags: parseTags(tagDrafts[paper.doc_id] ?? ''),
         is_favorite: isFavorite,
       });
-      setStatus(`Updated ${updated.title}.`);
+      setStatus(`已更新 ${updated.title}。`);
       await refreshPapers();
       await runSearch();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Paper update failed.');
+      setStatus(error instanceof Error ? error.message : '论文更新失败。');
     } finally {
       setIsBusy(false);
     }
@@ -174,7 +195,7 @@ export function KnowledgeBasePanel() {
       related_doc_id: relatedDocId || null,
     };
     if (!request.title || !request.content) {
-      setStatus('Notes need a title and body.');
+      setStatus('笔记需要标题和正文。');
       return;
     }
     setIsBusy(true);
@@ -185,9 +206,9 @@ export function KnowledgeBasePanel() {
       setNoteTags('');
       setRelatedDocId('');
       await runSearch(query || request.title);
-      setStatus('Note saved.');
+      setStatus('笔记已保存。');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Note save failed.');
+      setStatus(error instanceof Error ? error.message : '笔记保存失败。');
     } finally {
       setIsBusy(false);
     }
@@ -196,15 +217,15 @@ export function KnowledgeBasePanel() {
   return (
     <section className="knowledge-panel">
       <header className="panel-header">
-        <h2>Knowledge Base</h2>
-        <span className="status-line">{isBusy ? 'Working...' : status}</span>
+        <h2>知识库</h2>
+        <span className="status-line">{isBusy ? '处理中...' : status}</span>
       </header>
 
-      <section className="knowledge-toolbar" aria-label="Knowledge base actions">
+      <section className="knowledge-toolbar" aria-label="知识库操作">
         <form className="search-form" onSubmit={(event) => void handleSearch(event)}>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search papers, notes, gaps, experiments" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索论文、笔记、研究空白、实验方案" />
           <select value={activeTag} onChange={(event) => setActiveTag(event.target.value)}>
-            <option value="">All tags</option>
+            <option value="">全部标签</option>
             {availableTags.map((tag) => (
               <option value={tag} key={tag}>
                 {tag}
@@ -213,25 +234,43 @@ export function KnowledgeBasePanel() {
           </select>
           <label className="checkline">
             <input type="checkbox" checked={favoritesOnly} onChange={(event) => setFavoritesOnly(event.target.checked)} />
-            Favorites
+            仅收藏
           </label>
           <button type="submit" disabled={isBusy}>
-            Search
+            搜索
           </button>
         </form>
 
         <form className="upload-form" onSubmit={(event) => void handleUpload(event)}>
-          <input type="file" accept="application/pdf" onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)} />
+          <input
+            id="knowledge-upload-input"
+            className="file-input-hidden"
+            type="file"
+            accept="application/pdf"
+            onChange={(event) => chooseUploadFile(event.target.files?.[0])}
+          />
+          <label
+            className="upload-dropzone"
+            htmlFor="knowledge-upload-input"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={handleDrop}
+          >
+            <strong>拖拽 PDF 到这里</strong>
+            <span>{selectedFile ? selectedFile.name : '松开即可选择文件'}</span>
+          </label>
+          <label className="file-button upload-picker" htmlFor="knowledge-upload-input">
+            选择文件
+          </label>
           <button type="submit" disabled={isBusy}>
-            Upload PDF
+            上传 PDF
           </button>
         </form>
       </section>
 
       <section className="knowledge-grid">
-        <section className="paper-library" aria-label="Paper list">
+        <section className="paper-library" aria-label="论文列表">
           <div className="section-heading">
-            <h2>Papers</h2>
+            <h2>论文</h2>
             <span>{visibleResults.papers.length}</span>
           </div>
           {visiblePapers.map((paper) => (
@@ -241,37 +280,42 @@ export function KnowledgeBasePanel() {
                   <h3>{paper.title}</h3>
                   <p>{formatDate(paper.created_at)}</p>
                 </div>
-                <button type="button" className="icon-button" onClick={() => void handleSavePaper(paper, !paper.is_favorite)}>
-                  {paper.is_favorite ? 'Saved' : 'Save'}
-                </button>
+                <div className="record-actions">
+                  <button type="button" className="secondary-button" onClick={() => onAskWithPaper(paper.doc_id)}>
+                    用于问答
+                  </button>
+                  <button type="button" className="icon-button" onClick={() => void handleSavePaper(paper, !paper.is_favorite)}>
+                    {paper.is_favorite ? '已收藏' : '收藏'}
+                  </button>
+                </div>
               </div>
               <div className="tag-row">
-                {paper.tags.length ? paper.tags.map((tag) => <span key={tag}>{tag}</span>) : <span>Untagged</span>}
+                {paper.tags.length ? paper.tags.map((tag) => <span key={tag}>{tag}</span>) : <span>未打标签</span>}
               </div>
               <div className="inline-edit">
                 <input
                   value={tagDrafts[paper.doc_id] ?? ''}
                   onChange={(event) => setTagDrafts((current) => ({ ...current, [paper.doc_id]: event.target.value }))}
-                  placeholder="tag-a, tag-b"
+                  placeholder="标签一, 标签二"
                 />
                 <button type="button" onClick={() => void handleSavePaper(paper)}>
-                  Save
+                  保存
                 </button>
               </div>
             </article>
           ))}
         </section>
 
-        <section className="note-panel" aria-label="Create note">
+        <section className="note-panel" aria-label="创建笔记">
           <div className="section-heading">
-            <h2>New Note</h2>
+            <h2>新建笔记</h2>
           </div>
           <form className="note-form" onSubmit={(event) => void handleCreateNote(event)}>
-            <input value={noteTitle} onChange={(event) => setNoteTitle(event.target.value)} placeholder="Title" />
-            <textarea value={noteContent} onChange={(event) => setNoteContent(event.target.value)} placeholder="Observation, question, or experiment idea" />
-            <input value={noteTags} onChange={(event) => setNoteTags(event.target.value)} placeholder="Tags, comma separated" />
+            <input value={noteTitle} onChange={(event) => setNoteTitle(event.target.value)} placeholder="标题" />
+            <textarea value={noteContent} onChange={(event) => setNoteContent(event.target.value)} placeholder="观察、问题或实验想法" />
+            <input value={noteTags} onChange={(event) => setNoteTags(event.target.value)} placeholder="标签，用逗号分隔" />
             <select value={relatedDocId} onChange={(event) => setRelatedDocId(event.target.value)}>
-              <option value="">No related paper</option>
+              <option value="">不关联论文</option>
               {papers.map((paper) => (
                 <option value={paper.doc_id} key={paper.doc_id}>
                   {paper.title}
@@ -279,21 +323,21 @@ export function KnowledgeBasePanel() {
               ))}
             </select>
             <button type="submit" disabled={isBusy}>
-              Save note
+              保存笔记
             </button>
           </form>
         </section>
 
-        <section className="results-panel" aria-label="Search results">
+        <section className="results-panel" aria-label="搜索结果">
           <div className="section-heading">
-            <h2>Unified Search</h2>
+            <h2>统一搜索</h2>
             <span>{results.notes.length + results.chunks.length + results.gaps.length + results.experiments.length}</span>
           </div>
           <div className="result-columns">
-            <ResultGroup title="Notes" items={results.notes.map((note) => ({ id: note.note_id, title: note.title, body: note.content }))} />
-            <ResultGroup title="Chunks" items={results.chunks.map((chunk) => ({ id: chunk.chunk_id, title: `Page ${chunk.page}`, body: chunk.text }))} />
-            <ResultGroup title="Gaps" items={results.gaps.map((gap) => ({ id: gap.gap_id, title: gap.title, body: gap.description }))} />
-            <ResultGroup title="Experiments" items={results.experiments.map((experiment) => ({ id: experiment.experiment_id, title: experiment.objective, body: experiment.steps.join(' / ') }))} />
+            <ResultGroup title="笔记" items={results.notes.map((note) => ({ id: note.note_id, title: note.title, body: note.content }))} />
+            <ResultGroup title="论文片段" items={results.chunks.map((chunk) => ({ id: chunk.chunk_id, title: `第 ${chunk.page} 页`, body: chunk.text }))} />
+            <ResultGroup title="研究空白" items={results.gaps.map((gap) => ({ id: gap.gap_id, title: gap.title, body: gap.description }))} />
+            <ResultGroup title="实验方案" items={results.experiments.map((experiment) => ({ id: experiment.experiment_id, title: experiment.objective, body: experiment.steps.join(' / ') }))} />
           </div>
         </section>
       </section>

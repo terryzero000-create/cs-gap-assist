@@ -36,7 +36,7 @@ export function CitationForceGraph({ nodes, links }: CitationForceGraphProps) {
         .attr('y', height / 2)
         .attr('text-anchor', 'middle')
         .attr('fill', '#607080')
-        .text('No graph data');
+        .text('暂无图谱数据');
       return undefined;
     }
 
@@ -100,5 +100,5 @@ export function CitationForceGraph({ nodes, links }: CitationForceGraphProps) {
     };
   }, [nodes, links]);
 
-  return <svg ref={ref} className="citation-graph" viewBox="0 0 760 460" role="img" aria-label="Citation evolution graph" />;
+  return <svg ref={ref} className="citation-graph" viewBox="0 0 760 460" role="img" aria-label="引用演化图谱" />;
 }

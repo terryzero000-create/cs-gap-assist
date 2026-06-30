@@ -17,14 +17,6 @@ interface ReadingQAProps {
   setQuestion: Dispatch<SetStateAction<string>>;
 }
 
-const questionTemplates = [
-  '请总结这篇论文的核心贡献。',
-  '请解释方法流程和关键模块。',
-  '这篇论文的局限和未来工作是什么？',
-  '请提取实验设置、数据集、指标和主要结果。',
-  '这篇论文适合延伸出哪些研究问题？',
-];
-
 function renderAnswerWithCitationLinks(answer: string, sourceCount: number): ReactNode[] {
   return answer.split(/(\[(\d+)\])/g).reduce<ReactNode[]>((parts, token, index, tokens) => {
     const citationNumber = Number(token.match(/^\[(\d+)\]$/)?.[1]);
@@ -49,10 +41,26 @@ function renderAnswerWithCitationLinks(answer: string, sourceCount: number): Rea
 
 function formatAnswerMarkdown(question: string, result: ReadingQAResponse): string {
   const sources = result.sources
-    .map((source, index) => `${index + 1}. Page ${source.page}, ${source.chunk_id}\n\n${source.text}`)
+    .map((source, index) => `${index + 1}. 第 ${source.page} 页，${source.chunk_id}\n\n${source.text}`)
     .join('\n\n');
 
-  return `# 论文精读问答\n\n## 问题\n\n${question}\n\n## 答案\n\n${result.answer}\n\n## 来源段落\n\n${sources || '无来源段落。'}\n`;
+  return `# 简牍论文问答\n\n## 问题\n\n${question}\n\n## 回答\n\n${result.answer}\n\n## 来源片段\n\n${sources || '无来源片段'}\n`;
+}
+
+function formatWarning(warning: string): string {
+  if (warning.includes('Xfyun Spark embedding failed')) {
+    return '';
+  }
+  if (warning.includes('Local bge-m3 embedding request failed')) {
+    return '本地 bge-m3 暂不可用。请启动 Ollama 并运行 `ollama pull bge-m3`，以启用本地语义检索。';
+  }
+  if (warning.includes('mock embeddings') || warning.includes('mock vectors') || warning.includes('OPENAI_API_KEY missing')) {
+    return '当前使用本地测试向量，检索效果仅供开发验证。';
+  }
+  if (warning.includes('mock chat') || warning.includes('DEEPSEEK_API_KEY missing')) {
+    return '当前使用本地测试回答，配置 DeepSeek 后可启用真实模型输出。';
+  }
+  return warning;
 }
 
 export function ReadingQA({
@@ -77,7 +85,7 @@ export function ReadingQA({
       return;
     }
     await navigator.clipboard.writeText(formatAnswerMarkdown(question, result));
-    setActionMessage('已复制答案');
+    setActionMessage('已复制回答');
   }
 
   function exportAnswer() {
@@ -88,7 +96,7 @@ export function ReadingQA({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `reading-qa-${Date.now()}.md`;
+    link.download = `jiandu-reading-qa-${Date.now()}.md`;
     link.click();
     URL.revokeObjectURL(url);
     setActionMessage('已导出 Markdown');
@@ -96,26 +104,12 @@ export function ReadingQA({
 
   return (
     <section className="qa-panel">
-      <section className="template-panel" aria-label="常用追问">
-        <div className="section-heading">
-          <h2>常用追问</h2>
-          <span>快速开始</span>
-        </div>
-        <div className="template-list">
-          {questionTemplates.map((template) => (
-            <button className="template-button" key={template} onClick={() => setQuestion(template)} type="button">
-              {template}
-            </button>
-          ))}
-        </div>
-      </section>
-
       <form className="question-form" onSubmit={onAsk}>
         <label htmlFor="question">问题</label>
         <textarea
           id="question"
           onChange={(event) => setQuestion(event.target.value)}
-          placeholder="这篇论文的方法解决了什么问题？"
+          placeholder="例如：这篇论文的方法解决了什么问题？"
           rows={5}
           value={question}
         />
@@ -129,7 +123,7 @@ export function ReadingQA({
 
       <section className="answer-panel" aria-live="polite">
         <div className="section-heading">
-          <h2>答案</h2>
+          <h2>回答</h2>
           {result ? (
             <div className="answer-actions">
               <button className="secondary-button" onClick={copyAnswer} type="button">复制</button>
@@ -141,10 +135,10 @@ export function ReadingQA({
           <>
             {actionMessage ? <p className="action-message">{actionMessage}</p> : null}
             <p className="answer-text">{renderAnswerWithCitationLinks(result.answer, result.sources.length)}</p>
-            {result.warnings.map((warning) => (
+            {Array.from(new Set(result.warnings.map(formatWarning).filter(Boolean))).map((warning) => (
               <p className="warning" key={warning}>{warning}</p>
             ))}
-            <h3>来源段落</h3>
+            <h3>来源片段</h3>
             <ol className="source-list">
               {result.sources.map((source, index) => (
                 <li id={`source-${index + 1}`} key={source.chunk_id}>
@@ -159,7 +153,7 @@ export function ReadingQA({
             </ol>
           </>
         ) : (
-          <p className="empty-state">答案和引用段落会显示在这里。</p>
+          <p className="empty-state">回答和引用片段会显示在这里。</p>
         )}
       </section>
 

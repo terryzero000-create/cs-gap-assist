@@ -1,14 +1,14 @@
 # CS Gap Assist Project Status
 
-Last updated: 2026-06-02
+Last updated: 2026-06-30
 
 ## Purpose
 
-CS Gap Assist is a research gap analysis assistant for computer science papers. Users upload papers they have read, enter a research direction, and the system should retrieve related literature, identify research gaps, suggest evidence-backed experiments, visualize citation evolution, and manage a personal research knowledge base.
+CS Gap Assist is a research planning assistant for computer science papers. Users upload papers they have read, enter a research direction, and the system can retrieve related context, identify research gaps, suggest evidence-backed experiments, assemble research routes, visualize citation evolution, manage a personal research knowledge base, and assist with paper reproduction planning.
 
 ## Current Progress
 
-Overall first-version product progress: about 65%.
+Overall first-version product progress: about 75%.
 
 Foundation progress: about 70%.
 
@@ -24,7 +24,7 @@ Citation Graph branch MVP progress: 100% for isolated branch handoff.
 
 Knowledge Base branch MVP progress: 100% for isolated branch handoff.
 
-The project has a working repository foundation, one feature branch per module, and an integrated MVP branch that combines Reading QA, Research Gap, Experiment Suggestion, Citation Graph, and Knowledge Base behind one frontend navigation. The current implementation is still an MVP scaffold: several external integrations use deterministic mock/fallback behavior so development can continue without API keys or quota.
+The project has a working repository foundation, one feature branch per module, and an integrated MVP branch that now presents the main user flow as five top-level modules: 论文问答, 研究路线规划, 复现实验室, 引用图谱, and 知识库. Research Gap, Experiment Suggestion, and Research Routes are no longer separate route-planning tabs; they remain as backend capabilities and compatibility APIs that the Research Plan Agent calls internally. The current implementation is still an MVP scaffold: several external integrations use deterministic mock/fallback behavior so development can continue without API keys or quota.
 
 ## Branch Structure
 
@@ -34,8 +34,9 @@ The project has a working repository foundation, one feature branch per module, 
 - `codex/integration-mvp`
   - Combined MVP branch created from `codex/foundation`.
   - Merges `codex/reading-qa`, `codex/research-gap`, `codex/experiment-suggest`, `codex/citation-graph`, and `codex/knowledge-base` in order.
-  - Registers all feature routers in one FastAPI app.
-  - Provides unified frontend tabs for Reading QA, Research Gap, Experiment Suggest, Citation Graph, and Knowledge Base.
+  - Registers all feature routers in one FastAPI app, including the Research Plan Agent and Reproduction Lab agent.
+  - Provides unified frontend tabs for 论文问答, 研究路线规划, 复现实验室, 引用图谱, and 知识库.
+  - Folds Research Gap, Experiment Suggestion, and Research Routes into the Research Plan Agent output instead of exposing them as separate navigation steps.
 - `codex/reading-qa`
   - Paper reading Q&A module.
   - Adds `/api/v1/reading/qa` and returns answer plus paragraph-level sources.
@@ -60,12 +61,32 @@ The project has a working repository foundation, one feature branch per module, 
   - Adds paper listing, note creation/listing, tag/favorite updates, and unified search across papers, notes, chunks, Gap history, and experiment history.
   - Adds a usable frontend knowledge-base workbench with upload, search, filters, note creation, tag editing, and favorite toggling.
 
+## Current Top-Level Product Modules
+
+- 论文问答
+  - Upload and select papers.
+  - Ask questions over selected papers with paragraph-level sources.
+- 研究路线规划
+  - Runs a bounded tool-calling Agent over selected uploaded papers and an optional current experiment result.
+  - Automatically chains goal understanding, planning, knowledge search, paper summary, Research Gap analysis, top-gap selection, Experiment Suggestion, paper recommendation, research routes, and final execution cards.
+  - Returns `agent_steps`, `routes`, `final_cards`, and warnings.
+- 复现实验室
+  - Independent reproduction-planning Agent, not part of the Research Plan Agent.
+  - Reads one uploaded paper, extracts reproduction targets, datasets, metrics, baselines, algorithm notes, risks, and safe code/simulation templates.
+- 引用图谱
+  - Builds a D3-ready citation evolution graph for a keyword, with optional OpenAlex expansion and deterministic fallback.
+- 知识库
+  - Manages uploaded papers, notes, tags, favorites, and unified search across papers, notes, chunks, Gap history, and experiment history.
+
 ## Shared Contracts
 
 - All backend APIs use `/api/v1/`.
 - All backend route handlers under `/api/v1` must be `async`.
 - PDF upload returns a `doc_id` UUID string.
 - Follow-up operations reference uploaded papers by `doc_id`.
+- Research Plan Agent endpoint: `POST /api/v1/research-plan-agent/run`.
+- Reproduction Lab endpoint: `POST /api/v1/reproduction-agent/run`.
+- Research Gap and Experiment Suggestion endpoints remain public for compatibility and are also reused internally by the Research Plan Agent.
 - Unified error response shape: `{"error": "message", "code": 400}`.
 - Python code should use type annotations and docstrings.
 - Frontend TypeScript uses strict mode and should not introduce `any`.
@@ -122,18 +143,18 @@ npm test --prefix frontend
 npm run build --prefix frontend
 ```
 
-Current `codex/integration-mvp` verification at the time of this document:
+Latest focused `codex/integration-mvp` verification during the 2026-06-30 route-planning upgrade:
 
-- Backend: `36 passed`
-- Frontend: `tsc --noEmit` passed
-- Frontend build passed
+- Frontend: `npm run build --prefix frontend` passed.
+- Backend focused suite: `8 passed, 1 failed` when run against the local Chroma state after copying real 2560-dimensional paper vectors into `data/chroma`; the failing test uploads mock 16-dimensional vectors into the same persistent collection. This is local runtime-state contamination, not a Research Plan Agent contract failure.
 
 ## Known MVP Limitations
 
 - The integrated branch is an MVP, not a production deployment.
 - Some external literature behavior still uses deterministic fallback when live services are unavailable.
 - OpenAlex and arXiv behavior is optional and mostly deterministic mock/fallback code.
-- Reading QA, Research Gap, Experiment Suggestion, Citation Graph, and Knowledge Base have usable MVP workflows on their feature branches.
+- Reading QA, Research Plan Agent, Reproduction Lab, Citation Graph, and Knowledge Base have usable MVP workflows in the integrated app.
+- Research Gap and Experiment Suggestion are preserved as APIs and internal Agent tools, but are no longer separate top-level route-planning tabs.
 - RAG ranking is simple and designed for local development, not production retrieval quality.
 - DeepSeek and OpenAI real calls need real API keys and further integration testing.
 - Chroma is optional in tests; the memory mirror preserves local behavior.

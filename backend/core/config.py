@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     default_embedding_model: str = "text-embedding-3-small"
     local_bge_m3_base_url: str = "http://127.0.0.1:11434"
     local_bge_m3_model: str = "bge-m3"
+    xfyun_spark_app_id: str | None = None
+    xfyun_spark_api_key: str | None = None
+    xfyun_spark_api_secret: str | None = None
+    xfyun_spark_embedding_url: str = "https://emb-cn-huabei-1.xf-yun.com"
+    xfyun_spark_embedding_path: str = "/"
     enable_openalex: bool = False
     openalex_api_key: str | None = None
     external_search_timeout_seconds: float = 3.0

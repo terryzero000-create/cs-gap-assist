@@ -1,6 +1,6 @@
 # Local Setup
 
-Last updated: 2026-06-02
+Last updated: 2026-06-30
 
 ## Required Runtime
 
@@ -50,19 +50,30 @@ Semantic Scholar is deprecated and is not used by the Research Gap branch. arXiv
 
 ## Run Locally
 
-Backend:
+Windows:
 
 ```powershell
-uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+.\start-dev.bat
 ```
 
-Frontend:
+macOS/Linux:
 
-```powershell
-npm run dev --prefix frontend -- --host 127.0.0.1 --port 5173
+```bash
+chmod +x start-dev.sh stop-dev.sh
+./start-dev.sh
 ```
 
 Open `http://127.0.0.1:5173`.
+
+Stop the dev servers:
+
+```powershell
+.\stop-dev.bat
+```
+
+```bash
+./stop-dev.sh
+```
 
 ## Verify
 

@@ -1,5 +1,6 @@
 import hashlib
 import math
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -10,10 +11,62 @@ from backend.core.config import Settings
 from backend.models.schemas import ModelOption
 
 
+VECTOR_INDEX_SCHEMA_VERSION = 2
+
+
+def _normalized_vector(text: str, dimension: int) -> list[float]:
+    """Return a deterministic normalized vector with the requested dimension."""
+    values: list[float] = []
+    counter = 0
+    while len(values) < dimension:
+        digest = hashlib.sha256(f"{counter}:{text}".encode("utf-8")).digest()
+        values.extend(float(byte) / 255.0 for byte in digest)
+        counter += 1
+    raw = values[:dimension]
+    norm = math.sqrt(sum(value * value for value in raw)) or 1.0
+    return [value / norm for value in raw]
+
+
+@dataclass(frozen=True)
+class EmbeddingProfile:
+    """Stable identity for vectors that may safely share one collection."""
+
+    provider: str
+    model: str
+    dimension: int
+    schema_version: int = VECTOR_INDEX_SCHEMA_VERSION
+
+    @property
+    def key(self) -> str:
+        """Return a stable profile key used by SQLite index bookkeeping."""
+        return f"v{self.schema_version}:{self.provider}:{self.model}:{self.dimension}"
+
+    @property
+    def collection_name(self) -> str:
+        """Return a deterministic Chroma collection name."""
+        slug = re.sub(r"[^a-z0-9]+", "_", f"{self.provider}_{self.model}".lower()).strip("_")
+        return f"paper_chunks_v{self.schema_version}_{slug}_{self.dimension}"
+
+
+@dataclass(frozen=True)
+class EmbeddingResult:
+    """Vectors plus provenance required to prevent fallback index pollution."""
+
+    vectors: list[list[float]]
+    warnings: list[str]
+    profile: EmbeddingProfile
+    is_fallback: bool = False
+
+    def __iter__(self):
+        """Preserve the former two-value unpacking contract for internal callers."""
+        yield self.vectors
+        yield self.warnings
+
+
 class EmbeddingProvider:
     """Interface for text embedding providers."""
 
-    async def embed(self, texts: list[str]) -> tuple[list[list[float]], list[str]]:
+    async def embed(self, texts: list[str]) -> EmbeddingResult:
         """Embed input texts and return vectors plus recoverable warnings."""
         raise NotImplementedError
 
@@ -21,17 +74,17 @@ class EmbeddingProvider:
 class MockEmbeddingProvider(EmbeddingProvider):
     """Deterministic local embedding provider used when external keys are missing."""
 
-    async def embed(self, texts: list[str]) -> tuple[list[list[float]], list[str]]:
+    def __init__(self, model: str = "mock-embedding") -> None:
+        self.profile = EmbeddingProfile(provider="mock", model=model, dimension=16)
+
+    async def embed(self, texts: list[str]) -> EmbeddingResult:
         """Return stable hash-based vectors for local development."""
         vectors = [self._vectorize(text) for text in texts]
-        return vectors, ["Embedding provider fell back to mock vectors."]
+        return EmbeddingResult(vectors=vectors, warnings=[], profile=self.profile, is_fallback=False)
 
     def _vectorize(self, text: str) -> list[float]:
         """Convert text into a normalized deterministic vector."""
-        digest = hashlib.sha256(text.encode("utf-8")).digest()
-        raw = [float(byte) / 255.0 for byte in digest[:16]]
-        norm = math.sqrt(sum(value * value for value in raw)) or 1.0
-        return [value / norm for value in raw]
+        return _normalized_vector(text, self.profile.dimension)
 
 
 class OpenAIEmbeddingProvider(EmbeddingProvider):
@@ -41,15 +94,23 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         """Create an OpenAI embedding provider."""
         self.settings = settings
         self.model = model or settings.default_embedding_model
-        self.mock = MockEmbeddingProvider()
+        self.profile = EmbeddingProfile(provider="openai", model=self.model, dimension=1536)
 
-    async def embed(self, texts: list[str]) -> tuple[list[list[float]], list[str]]:
+    async def embed(self, texts: list[str]) -> EmbeddingResult:
         """Embed texts or fall back to mock vectors when no key is configured."""
         if not self.settings.openai_api_key:
-            vectors, warnings = await self.mock.embed(texts)
-            return vectors, [f"OPENAI_API_KEY missing; using mock embeddings instead of {self.model}.", *warnings]
-        vectors, warnings = await self.mock.embed(texts)
-        return vectors, [f"OpenAI embedding call is not enabled in MVP tests; using mock vectors for {self.model}.", *warnings]
+            return EmbeddingResult(
+                vectors=[_normalized_vector(text, self.profile.dimension) for text in texts],
+                warnings=[f"OPENAI_API_KEY missing; embedding request fell back instead of {self.model}."],
+                profile=self.profile,
+                is_fallback=True,
+            )
+        return EmbeddingResult(
+            vectors=[_normalized_vector(text, self.profile.dimension) for text in texts],
+            warnings=[f"OpenAI embedding call is not enabled; request fell back for {self.model}."],
+            profile=self.profile,
+            is_fallback=True,
+        )
 
 
 class LocalBgeM3EmbeddingProvider(EmbeddingProvider):
@@ -61,12 +122,12 @@ class LocalBgeM3EmbeddingProvider(EmbeddingProvider):
         self.base_url = settings.local_bge_m3_base_url.rstrip("/")
         self.model = model or settings.local_bge_m3_model
         self.transport = transport
-        self.mock = MockEmbeddingProvider()
+        self.profile = EmbeddingProfile(provider="local-bge-m3", model=self.model, dimension=1024)
 
-    async def embed(self, texts: list[str]) -> tuple[list[list[float]], list[str]]:
+    async def embed(self, texts: list[str]) -> EmbeddingResult:
         """Embed texts with local bge-m3 or fall back to deterministic mock vectors."""
         if not texts:
-            return [], []
+            return EmbeddingResult(vectors=[], warnings=[], profile=self.profile)
         payload: dict[str, Any] = {"model": self.model, "input": texts}
         try:
             async with httpx.AsyncClient(timeout=60.0, transport=self.transport) as client:
@@ -77,10 +138,16 @@ class LocalBgeM3EmbeddingProvider(EmbeddingProvider):
             if not isinstance(embeddings, list) or len(embeddings) != len(texts):
                 raise ValueError("Ollama /api/embed response did not contain one embedding per input text.")
             vectors = [[float(value) for value in vector] for vector in embeddings]
-            return vectors, []
+            dimension = len(vectors[0]) if vectors else self.profile.dimension
+            profile = EmbeddingProfile(provider=self.profile.provider, model=self.profile.model, dimension=dimension)
+            return EmbeddingResult(vectors=vectors, warnings=[], profile=profile)
         except Exception as exc:
-            vectors, _warnings = await self.mock.embed(texts)
-            return vectors, [f"Local bge-m3 embedding request failed ({exc}); using mock vectors."]
+            return EmbeddingResult(
+                vectors=[_normalized_vector(text, self.profile.dimension) for text in texts],
+                warnings=[f"Local bge-m3 embedding request failed ({exc}); using lexical fallback."],
+                profile=self.profile,
+                is_fallback=True,
+            )
 
 
 class XfyunSparkEmbeddingProvider(EmbeddingProvider):
@@ -103,38 +170,37 @@ class XfyunSparkEmbeddingProvider(EmbeddingProvider):
     ) -> None:
         self.settings = settings
         self.domain = model or settings.default_embedding_model or "query"
-        self.mock = MockEmbeddingProvider()
+        self.profile = EmbeddingProfile(provider="xfyun-spark", model="spark-embedding", dimension=2560)
 
-    async def embed(self, texts: list[str]) -> tuple[list[list[float]], list[str]]:
+    async def embed(self, texts: list[str]) -> EmbeddingResult:
         if not texts:
-            return [], []
+            return EmbeddingResult(vectors=[], warnings=[], profile=self.profile)
         if not self.settings.xfyun_spark_app_id or not self.settings.xfyun_spark_api_key or not self.settings.xfyun_spark_api_secret:
-            vectors, _ = await self.mock.embed(texts)
-            return vectors, ["XFYUN_SPARK credentials missing; using mock vectors for Xfyun Spark embedding."]
+            return EmbeddingResult(
+                vectors=[self._vectorize_fallback(text) for text in texts],
+                warnings=["XFYUN_SPARK credentials missing; using lexical fallback."],
+                profile=self.profile,
+                is_fallback=True,
+            )
 
         vectors: list[list[float]] = []
         warnings: list[str] = []
+        used_fallback = False
 
         for text in texts:
             try:
                 vector = self._embed_single_sync(text)
                 vectors.append(vector)
-            except Exception:
+            except Exception as exc:
                 vectors.append(self._vectorize_fallback(text))
+                used_fallback = True
+                warnings.append(f"Xfyun Spark embedding failed ({exc}); using lexical fallback.")
 
-        return vectors, warnings
+        return EmbeddingResult(vectors=vectors, warnings=warnings, profile=self.profile, is_fallback=used_fallback)
 
     def _vectorize_fallback(self, text: str) -> list[float]:
         """Return a deterministic 2560-dim vector compatible with Spark embeddings."""
-        values: list[float] = []
-        counter = 0
-        while len(values) < 2560:
-            digest = hashlib.sha256(f"{counter}:{text}".encode("utf-8")).digest()
-            values.extend((float(byte) / 255.0) for byte in digest)
-            counter += 1
-        raw = values[:2560]
-        norm = math.sqrt(sum(value * value for value in raw)) or 1.0
-        return [value / norm for value in raw]
+        return _normalized_vector(text, self.profile.dimension)
 
     # ------------------------------------------------------------------
     # All methods below mirror the official Embedding.py demo precisely
@@ -258,7 +324,7 @@ def _openai_factory(settings: Settings, model: str | None) -> EmbeddingProvider:
 
 
 def _mock_factory(settings: Settings, model: str | None) -> EmbeddingProvider:
-    return MockEmbeddingProvider()
+    return MockEmbeddingProvider(model or "mock-embedding")
 
 
 def _xfyun_spark_factory(settings: Settings, model: str | None) -> EmbeddingProvider:

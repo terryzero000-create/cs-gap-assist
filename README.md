@@ -144,6 +144,7 @@ npm run build --prefix frontend
 | `POST /api/v1/experiments/suggest` | 独立实验建议 |
 | `GET /api/v1/experiments/history` | 实验建议历史 |
 | `GET /api/v1/knowledge/search` | 知识库搜索 |
+| `GET /api/v1/vector-index/status` | 查看向量索引、缺失 chunks 和最近迁移状态 |
 
 上传论文示例：
 
@@ -174,8 +175,33 @@ Invoke-RestMethod "http://127.0.0.1:8002/api/v1/citations/graph?keyword=retrieva
 | `ENABLE_OPENALEX` | 是否启用 OpenAlex 引用扩展 |
 | `OPENALEX_API_KEY` | OpenAlex API key |
 | `EXTERNAL_SEARCH_TIMEOUT_SECONDS` | 外部检索超时时间 |
+| `EXTERNAL_NETWORK_ENABLED` | 是否允许 arXiv 等外部网络检索；测试环境应设为 `false` |
 
 `data/` 会被 Git 忽略，里面是本地运行状态，不要当作源码提交。
+
+## 向量索引维护
+
+向量索引以 SQLite chunks 为可重建的数据源。真实 embedding 服务失败时不会把 fallback 向量写入真实 collection；上传会返回 503，查询会降级为 SQLite 词法检索。
+
+查看迁移计划（默认只读，不迁移）：
+
+```powershell
+python -m backend.scripts.migrate_vector_index
+```
+
+执行或继续无损迁移：
+
+```powershell
+python -m backend.scripts.migrate_vector_index --apply
+```
+
+只验证当前状态：
+
+```powershell
+python -m backend.scripts.migrate_vector_index --verify-only
+```
+
+迁移使用稳定的 collection 名、chunk ID 和内容哈希，可以重复执行。成功切换后仍保留 legacy collection，不会自动删除旧向量。
 
 ## 项目结构
 
@@ -204,7 +230,7 @@ docs/
 - 多数外部模型和文献服务都有 deterministic fallback，方便无 key 开发。
 - 真实 DeepSeek、OpenAI、OpenAlex 行为仍需要 API key 和集成测试。
 - RAG ranking 仍偏简单，适合开发验证，不适合作为最终学术质量判断。
-- Chroma 是可选依赖；本地 `data/chroma` 状态可能影响测试，遇到向量维度冲突时先清理本地运行数据。
+- Chroma 是可选依赖；不可用时查询会降级到 SQLite 词法检索。不要手工删除 legacy collection，应使用迁移命令检查和重建索引。
 - 复现实验室只生成辅助报告和模板，不执行代码，不承诺复现论文指标。
 
 ## 更多文档

@@ -3,6 +3,7 @@
 from backend.api import paper as paper_api
 from backend.core.config import get_settings
 from backend.main import app
+from backend.rag.embedder import EmbeddingProfile, EmbeddingResult
 
 
 def test_health_check_returns_ok() -> None:
@@ -61,10 +62,16 @@ def test_pdf_upload_uses_para_domain_for_xfyun_document_embeddings(monkeypatch, 
     captured_models: list[str | None] = []
 
     class FakeEmbeddingProvider:
-        async def embed(self, texts: list[str]) -> tuple[list[list[float]], list[str]]:
-            return [[0.1] * 2560 for _ in texts], []
+        async def embed(self, texts: list[str]) -> EmbeddingResult:
+            return EmbeddingResult(
+                vectors=[[0.1] * 2560 for _ in texts],
+                warnings=[],
+                profile=EmbeddingProfile(provider="xfyun-spark", model="spark-embedding", dimension=2560),
+            )
 
     class FakeVectorStore:
+        profile = EmbeddingProfile(provider="xfyun-spark", model="spark-embedding", dimension=2560)
+
         def add_chunks(self, chunks, embeddings) -> None:
             pass
 
@@ -76,7 +83,7 @@ def test_pdf_upload_uses_para_domain_for_xfyun_document_embeddings(monkeypatch, 
     monkeypatch.setenv("DEFAULT_EMBEDDING_PROVIDER", "xfyun-spark")
     get_settings.cache_clear()
     monkeypatch.setattr(paper_api, "get_embedding_provider", fake_get_embedding_provider)
-    monkeypatch.setattr(paper_api, "vector_store", FakeVectorStore())
+    monkeypatch.setattr(paper_api, "get_vector_index_manager", lambda: FakeVectorStore())
     client = TestClient(app)
 
     response = client.post(

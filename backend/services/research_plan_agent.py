@@ -16,7 +16,6 @@ from backend.models.schemas import (
     ResearchPlanCard,
     ResearchPlanRoute,
 )
-from backend.rag.vector_store import vector_store
 from backend.repositories.sqlite_store import SQLiteStore
 from backend.services.arxiv_search import ArxivSearchClient
 
@@ -125,10 +124,7 @@ class ResearchPlanAgentService:
         return "Plan created: retrieve context, summarize papers, analyze gaps, suggest experiments, recommend papers, generate cards."
 
     async def knowledge_search_tool(self, state: ResearchPlanState) -> str:
-        chunks = vector_store.all_chunks(doc_ids=state.request.selected_paper_ids)
-        if not chunks:
-            chunks = self.store.list_chunks(state.request.selected_paper_ids)
-            state.warnings.append("Vector memory had no selected chunks; used SQLite chunk fallback.")
+        chunks = self.store.list_chunks(state.request.selected_paper_ids)
         state.retrieved_context = self._rank_chunks(chunks, state.request.research_direction)[:8]
         return f"Retrieved {len(state.retrieved_context)} context chunks from {len(state.request.selected_paper_ids)} selected paper(s)."
 

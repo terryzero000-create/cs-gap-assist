@@ -68,12 +68,37 @@ const reproductionModeLabels: Record<ReproductionMode, string> = {
   template: '模板优先',
 };
 
-const modules: { key: ModuleKey; label: string }[] = [
-  { key: 'reading', label: '论文问答' },
-  { key: 'research-plan', label: '研究路线规划' },
-  { key: 'reproduction', label: '复现实验室' },
-  { key: 'citations', label: '引用图谱' },
-  { key: 'knowledge', label: '知识库' },
+const modules: { key: ModuleKey; label: string; note: string; description: string }[] = [
+  {
+    key: 'reading',
+    label: '论文问答',
+    note: '基于来源的精读',
+    description: '选中论文，用带引用的问答快速定位方法、结论与关键证据。',
+  },
+  {
+    key: 'research-plan',
+    label: '研究路线',
+    note: '从问题到选题',
+    description: '串联现有论文、研究空白与实验方向，形成一条可执行的研究路线。',
+  },
+  {
+    key: 'reproduction',
+    label: '复现实验室',
+    note: '把论文变成步骤',
+    description: '拆解实现依赖、关键公式与实验配置，让复现过程更有把握。',
+  },
+  {
+    key: 'citations',
+    label: '引用图谱',
+    note: '追踪方法演化',
+    description: '从关键词出发观察关键论文、引用关系与技术脉络。',
+  },
+  {
+    key: 'knowledge',
+    label: '知识库',
+    note: '沉淀研究资产',
+    description: '集中管理论文、笔记、标签与历史结果，随时检索和继续研读。',
+  },
 ];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -124,6 +149,16 @@ function formatSystemWarning(warning: string): string {
 
 function uniqueFormattedWarnings(warnings: string[]): string[] {
   return Array.from(new Set(warnings.map(formatSystemWarning).filter(Boolean)));
+}
+
+function readableClientError(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) {
+    return fallback;
+  }
+  if (/failed to fetch|unexpected end of json|networkerror/i.test(error.message)) {
+    return `${fallback} 请确认本地后端服务已启动。`;
+  }
+  return error.message;
 }
 
 export function App() {
@@ -182,6 +217,8 @@ export function App() {
     () => (citationGraph?.nodes ?? []).filter((node) => node.is_key).slice(0, 5),
     [citationGraph],
   );
+  const activeModuleDetail = modules.find((module) => module.key === activeModule) ?? modules[0];
+  const activeModuleIndex = modules.findIndex((module) => module.key === activeModule) + 1;
 
   useEffect(() => {
     window.localStorage.setItem(historyStorageKey, JSON.stringify(history));
@@ -214,7 +251,7 @@ export function App() {
       setReadingPapers((current) => mergeReadingPapers(current, uploaded));
       setSelectedReadingDocIds((current) => mergeDocIds(current, uploaded.map((paper) => paper.doc_id)));
     } catch (error) {
-      setReadingUploadError(error instanceof Error ? error.message : '上传失败，请稍后重试。');
+      setReadingUploadError(readableClientError(error, '上传失败，请稍后重试。'));
     } finally {
       setIsUploadingReadingPaper(false);
       event.target.value = '';
@@ -228,7 +265,7 @@ export function App() {
       setReadingPapers((current) => mergeReadingPapers(current, storedPapers));
       return storedPapers;
     } catch (error) {
-      setReadingUploadError(error instanceof Error ? error.message : '无法加载论文列表。');
+      setReadingUploadError(readableClientError(error, '无法读取论文列表。'));
       return [];
     }
   }
@@ -266,7 +303,7 @@ export function App() {
         ...current,
       ].slice(0, 8));
     } catch (error) {
-      setQaError(error instanceof Error ? error.message : '提问失败，请稍后重试。');
+      setQaError(readableClientError(error, '提问失败，请稍后重试。'));
     } finally {
       setIsAsking(false);
     }
@@ -301,7 +338,7 @@ export function App() {
       setGapPapers((current) => [{ ...result, selected: true }, ...current]);
       setGapWarnings(result.warnings);
     } catch (caught) {
-      setGapError(caught instanceof Error ? caught.message : '上传失败');
+      setGapError(readableClientError(caught, '上传失败。'));
     } finally {
       setIsUploadingGapPaper(false);
     }
@@ -316,7 +353,7 @@ export function App() {
       setSelectedGapId((current) => current || result.gaps[0]?.gap_id || '');
       setGapWarnings(result.warnings);
     } catch (caught) {
-      setGapError(caught instanceof Error ? caught.message : '分析失败');
+      setGapError(readableClientError(caught, '分析失败。'));
     } finally {
       setIsAnalyzing(false);
     }
@@ -331,7 +368,7 @@ export function App() {
       setSelectedGapId((current) => current || result.gaps[0]?.gap_id || '');
       setGapWarnings(result.warnings);
     } catch (caught) {
-      setGapError(caught instanceof Error ? caught.message : '无法加载研究空白历史');
+      setGapError(readableClientError(caught, '无法加载研究空白历史。'));
     } finally {
       setIsLoadingGapHistory(false);
     }
@@ -353,7 +390,7 @@ export function App() {
         })),
       );
     } catch (caught) {
-      setGapError(caught instanceof Error ? caught.message : '无法加载论文列表');
+      setGapError(readableClientError(caught, '无法加载论文列表。'));
     } finally {
       setIsLoadingPapers(false);
     }
@@ -375,7 +412,7 @@ export function App() {
       setPlans(result.experiments);
       setExperimentWarnings(result.warnings);
     } catch (caught) {
-      setExperimentError(caught instanceof Error ? caught.message : '无法生成实验建议');
+      setExperimentError(readableClientError(caught, '无法生成实验建议。'));
     } finally {
       setIsSuggesting(false);
     }
@@ -389,7 +426,7 @@ export function App() {
       setPlans(result.experiments);
       setExperimentWarnings(result.warnings);
     } catch (caught) {
-      setExperimentError(caught instanceof Error ? caught.message : '无法加载实验历史');
+      setExperimentError(readableClientError(caught, '无法加载实验历史。'));
     } finally {
       setIsLoadingPlans(false);
     }
@@ -416,7 +453,7 @@ export function App() {
       setPlanPapers(result.papers);
       setSelectedPlanDocIds((current) => (current.length > 0 ? current : result.papers.map((paper) => paper.doc_id)));
     } catch (caught) {
-      setResearchPlanError(caught instanceof Error ? caught.message : 'Could not load papers');
+      setResearchPlanError(readableClientError(caught, '无法加载论文列表。'));
     } finally {
       setIsLoadingPlanPapers(false);
     }
@@ -442,7 +479,7 @@ export function App() {
         }),
       );
     } catch (caught) {
-      setResearchPlanError(caught instanceof Error ? caught.message : 'Could not run research plan agent');
+      setResearchPlanError(readableClientError(caught, '无法运行研究路线 Agent。'));
     } finally {
       setIsRunningResearchPlan(false);
     }
@@ -460,7 +497,7 @@ export function App() {
     try {
       setCitationGraph(await fetchCitationGraph(keyword, citationMaxNodes));
     } catch (caught) {
-      setCitationError(caught instanceof Error ? caught.message : '无法加载引用图谱');
+      setCitationError(readableClientError(caught, '无法加载引用图谱。'));
     } finally {
       setIsLoadingCitationGraph(false);
     }
@@ -469,12 +506,16 @@ export function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div>
-          <p className="eyebrow">简牍</p>
-          <h1>计算机论文研读与选题助手</h1>
+        <div className="brand-lockup">
+          <span className="brand-mark" aria-hidden="true">简</span>
+          <div>
+            <p className="eyebrow">JIANDU / RESEARCH OS</p>
+            <h1>计算机论文研读<br />与选题助手</h1>
+          </div>
         </div>
         <nav className="module-tabs" aria-label="Modules">
-          {modules.map((module) => (
+          <p className="nav-label">研究工作流</p>
+          {modules.map((module, index) => (
             <button
               aria-pressed={activeModule === module.key}
               className={activeModule === module.key ? 'module-tab active' : 'module-tab'}
@@ -482,11 +523,31 @@ export function App() {
               onClick={() => setActiveModule(module.key)}
               type="button"
             >
-              {module.label}
+              <span className="module-index" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+              <span className="module-tab-copy">
+                <strong>{module.label}</strong>
+                <small>{module.note}</small>
+              </span>
             </button>
           ))}
         </nav>
+        <div className="rail-status">
+          <span className="status-dot" aria-hidden="true" />
+          <span><strong>Local-first</strong> 本地知识工作台</span>
+        </div>
       </header>
+
+      <section className="page-intro" aria-labelledby="active-module-title">
+        <div>
+          <p className="page-kicker">WORKSPACE / {String(activeModuleIndex).padStart(2, '0')}</p>
+          <h2 id="active-module-title">{activeModuleDetail.label}</h2>
+          <p>{activeModuleDetail.description}</p>
+        </div>
+        <div className="page-meta" aria-label="工作区特性">
+          <span>来源可追溯</span>
+          <span>本地优先</span>
+        </div>
+      </section>
 
       {activeModule === 'reading' ? (
         <section className="workspace" aria-label="论文问答工作区">
@@ -886,7 +947,7 @@ function ReproductionLab() {
       setPapers(response.papers);
       setSelectedPaperId((current) => current || response.papers[0]?.doc_id || '');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '无法加载论文列表');
+      setError(readableClientError(caught, '无法加载论文列表。'));
     } finally {
       setIsLoadingPapers(false);
     }
@@ -910,7 +971,7 @@ function ReproductionLab() {
         }),
       );
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : '无法运行复现实验室 Agent');
+      setError(readableClientError(caught, '无法运行复现实验室 Agent。'));
     } finally {
       setIsRunning(false);
     }

@@ -13,16 +13,20 @@ class ArxivSearchClient:
         base_url: str = "https://export.arxiv.org/api/query",
         transport: httpx.AsyncBaseTransport | None = None,
         timeout_seconds: float = 3.0,
+        enabled: bool = True,
     ) -> None:
         """Create an arXiv search client."""
         self.base_url = base_url
         self.transport = transport
         self.timeout_seconds = timeout_seconds
+        self.enabled = enabled
 
     async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
         """Search arXiv papers related to a query."""
         if not query.strip():
             return [], ["arXiv query is empty; no external papers searched."]
+        if not self.enabled:
+            return self._fallback(query, limit), ["External network is disabled; using deterministic arXiv fallback."]
         params = {
             "search_query": f"all:{query}",
             "start": "0",

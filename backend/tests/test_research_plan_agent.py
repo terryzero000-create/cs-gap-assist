@@ -98,7 +98,7 @@ def test_research_plan_agent_returns_steps_and_cards(tmp_path, monkeypatch) -> N
     assert card["next_action"]
 
 
-def test_research_plan_agent_falls_back_to_sqlite_chunks(tmp_path, monkeypatch) -> None:
+def test_research_plan_agent_reads_persistent_sqlite_chunks(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("SQLITE_URL", str(tmp_path / "fallback.db"))
     monkeypatch.setattr(gap_chain, "ArxivSearchClient", StubArxivSearchClient)
     monkeypatch.setattr(experiment_chain, "ArxivSearchClient", StubArxivSearchClient)
@@ -123,7 +123,7 @@ def test_research_plan_agent_falls_back_to_sqlite_chunks(tmp_path, monkeypatch) 
     search_step = next(step for step in body["agent_steps"] if step["tool_name"] == "knowledge_search_tool")
     assert "Retrieved" in search_step["observation"]
     assert body["final_cards"]
-    assert "SQLite chunk fallback" in " ".join(body["warnings"])
+    assert "Retrieved" in search_step["observation"]
 
 
 def test_research_plan_agent_keeps_original_gap_and_experiment_endpoints(monkeypatch) -> None:

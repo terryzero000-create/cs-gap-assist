@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     enable_openalex: bool = False
     openalex_api_key: str | None = None
     external_search_timeout_seconds: float = 3.0
+    external_network_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

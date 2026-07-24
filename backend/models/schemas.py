@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -41,6 +41,31 @@ class ModelConfigResponse(BaseModel):
     default_embedding_provider: str
     default_embedding_model: str
     providers: dict[str, list[ModelOption]]
+
+
+class EmbeddingProfileStatus(BaseModel):
+    """Non-sensitive identity of the configured vector space."""
+
+    provider: str
+    model: str
+    dimension: int
+    schema_version: int
+    key: str
+
+
+class VectorIndexStatusResponse(WarningMixin):
+    """Operational status of the rebuildable vector index."""
+
+    state: Literal["ready", "legacy", "migrating", "migration_required", "degraded", "empty"]
+    profile: EmbeddingProfileStatus
+    active_collection: str
+    legacy_collection: str | None = None
+    sqlite_chunk_count: int
+    indexed_chunk_count: int
+    missing_chunk_count: int
+    orphan_vector_count: int
+    failed_chunk_count: int
+    last_migration: dict[str, Any] | None = None
 
 
 class PaperChunk(BaseModel):

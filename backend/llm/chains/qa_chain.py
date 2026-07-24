@@ -1,20 +1,40 @@
 from backend.core.config import Settings
 from backend.llm.llm_service import get_chat_provider
 from backend.models.schemas import ReadingQARequest, ReadingQAResponse, SourceParagraph
-from backend.rag.embedder import get_embedding_provider
-from backend.rag.vector_store import vector_store
+from backend.repositories.sqlite_store import SQLiteStore
+from backend.services.vector_index import (
+    configured_embedding_provider,
+    get_vector_index_manager,
+    lexical_chunk_search,
+)
 
 
 async def answer_question(request: ReadingQARequest, settings: Settings) -> ReadingQAResponse:
     """Answer a paper-reading question with paragraph-level citations."""
     selected = request.runtime_model_config
-    embedding_provider = get_embedding_provider(
-        settings,
-        selected.embedding_provider if selected else None,
-        selected.embedding_model if selected else None,
-    )
-    query_vectors, embedding_warnings = await embedding_provider.embed([request.question])
-    chunks = vector_store.search(query_vectors[0], doc_ids=request.doc_ids, top_k=request.top_k)
+    embedding_warnings: list[str] = []
+    if selected and (
+        (selected.embedding_provider and selected.embedding_provider != settings.default_embedding_provider)
+        or (selected.embedding_model and selected.embedding_model != settings.default_embedding_model)
+    ):
+        embedding_warnings.append("Runtime embedding override was ignored to preserve index compatibility.")
+    embedding_result = await configured_embedding_provider(settings).embed([request.question])
+    embedding_warnings.extend(embedding_result.warnings)
+    stored_chunks = SQLiteStore(settings.sqlite_path).list_chunks(request.doc_ids)
+    if embedding_result.is_fallback and settings.default_embedding_provider != "mock":
+        chunks = lexical_chunk_search(stored_chunks, request.question, request.top_k)
+        embedding_warnings.append("Semantic retrieval was unavailable; SQLite lexical fallback was used.")
+    else:
+        try:
+            chunks = get_vector_index_manager().search(
+                embedding_result.vectors[0], doc_ids=request.doc_ids, top_k=request.top_k
+            )
+        except Exception as exc:
+            chunks = lexical_chunk_search(stored_chunks, request.question, request.top_k)
+            embedding_warnings.append(f"Vector index was unavailable ({exc}); SQLite lexical fallback was used.")
+        if not chunks and stored_chunks:
+            chunks = lexical_chunk_search(stored_chunks, request.question, request.top_k)
+            embedding_warnings.append("Active vector index had no matching chunks; SQLite lexical fallback was used.")
     sources = [
         SourceParagraph(
             doc_id=chunk.doc_id,

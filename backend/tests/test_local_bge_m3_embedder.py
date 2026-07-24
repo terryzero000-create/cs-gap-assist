@@ -34,8 +34,8 @@ def test_get_embedding_provider_resolves_local_bge_m3() -> None:
     assert isinstance(provider, LocalBgeM3EmbeddingProvider)
 
 
-def test_xfyun_spark_provider_silently_falls_back_to_2560_dim_vector_on_api_error(monkeypatch) -> None:
-    """Spark embedding failures should remain recoverable without surfacing raw provider errors."""
+def test_xfyun_spark_provider_marks_fallback_on_api_error(monkeypatch) -> None:
+    """Spark failures must be marked so their vectors cannot pollute a real index."""
     provider = XfyunSparkEmbeddingProvider(
         Settings(
             xfyun_spark_app_id="app",
@@ -50,11 +50,13 @@ def test_xfyun_spark_provider_silently_falls_back_to_2560_dim_vector_on_api_erro
         lambda text: (_ for _ in ()).throw(RuntimeError("Xfyun Spark API error (code=11202): licc failed")),
     )
 
-    vectors, warnings = asyncio.run(provider.embed(["paper chunk"]))
+    result = asyncio.run(provider.embed(["paper chunk"]))
+    vectors, warnings = result
 
     assert len(vectors) == 1
     assert len(vectors[0]) == 2560
-    assert warnings == []
+    assert result.is_fallback is True
+    assert "lexical fallback" in warnings[0]
 
 
 def test_xfyun_spark_provider_uses_configured_default_domain() -> None:

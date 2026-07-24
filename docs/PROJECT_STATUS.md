@@ -129,7 +129,10 @@ The project has a working repository foundation, one feature branch per module, 
 ## Storage Policy
 
 - SQLite stores paper metadata, gap history, experiment suggestions, favorite state, tags, and notes.
-- Chroma is represented by `ChromaVectorStore`; if Chroma is unavailable, it falls back to an in-memory mirror.
+- Chroma collections are isolated by embedding profile and schema version; SQLite chunks remain the rebuildable source of truth.
+- Fallback vectors from a failed real embedding provider are never written into a real collection.
+- `GET /api/v1/vector-index/status` reports index coverage and migration state without exposing credentials.
+- `python -m backend.scripts.migrate_vector_index` performs a dry run by default and can safely resume with `--apply`.
 - Vector filtering must support `doc_id`, `tags`, and `module_source`.
 - `data/` is ignored by Git and should be treated as local runtime state.
 

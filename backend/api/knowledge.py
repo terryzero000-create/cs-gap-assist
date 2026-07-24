@@ -11,7 +11,6 @@ from backend.models.schemas import (
     PaperCollectionUpdateRequest,
     PaperRecord,
 )
-from backend.rag.vector_store import vector_store
 from backend.repositories.sqlite_store import SQLiteStore
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -67,13 +66,10 @@ async def search_knowledge(query: str = "", tag: str | None = None, favorites_on
         papers = [paper for paper in papers if paper.is_favorite]
     notes = store.list_notes(query)
     paper_doc_ids = {paper.doc_id for paper in all_papers}
-    chunks = [
-        chunk
-        for chunk in vector_store.all_chunks()
-        if chunk.doc_id in paper_doc_ids and query.lower() in chunk.text.lower()
-    ]
+    stored_chunks = store.list_chunks()
+    chunks = [chunk for chunk in stored_chunks if chunk.doc_id in paper_doc_ids and query.lower() in chunk.text.lower()]
     if not chunks:
-        chunks = [chunk for chunk in vector_store.all_chunks() if chunk.doc_id in paper_doc_ids][:5]
+        chunks = [chunk for chunk in stored_chunks if chunk.doc_id in paper_doc_ids][:5]
     gaps = [gap for gap in store.list_gaps() if _matches_gap(gap, query)]
     experiments = [experiment for experiment in store.list_experiments() if _matches_experiment(experiment, query)]
     return KnowledgeSearchResponse(papers=papers, notes=notes, chunks=chunks, gaps=gaps, experiments=experiments)

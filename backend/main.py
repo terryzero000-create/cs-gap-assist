@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api import citation, config, experiment, gap, knowledge, paper, reading, reproduction_agent, research_plan_agent
+from backend.api import citation, config, experiment, gap, knowledge, paper, reading, reproduction_agent, research_plan_agent, vector_index
 from backend.core.config import get_settings
 from backend.core.errors import register_error_handlers
 
@@ -24,6 +24,7 @@ app.include_router(paper.router, prefix=settings.api_prefix)
 app.include_router(reading.router, prefix=settings.api_prefix)
 app.include_router(reproduction_agent.router, prefix=settings.api_prefix)
 app.include_router(research_plan_agent.router, prefix=settings.api_prefix)
+app.include_router(vector_index.router, prefix=settings.api_prefix)
 
 
 @app.get(f"{settings.api_prefix}/health")

@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,6 +68,40 @@ class SQLiteStore:
                     related_gap_id TEXT,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS vector_index_entries (
+                    chunk_id TEXT NOT NULL,
+                    profile_key TEXT NOT NULL,
+                    collection_name TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    error TEXT,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (chunk_id, profile_key)
+                );
+                CREATE TABLE IF NOT EXISTS vector_index_state (
+                    profile_key TEXT PRIMARY KEY,
+                    active_collection TEXT,
+                    state TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS vector_index_migrations (
+                    migration_id TEXT PRIMARY KEY,
+                    profile_key TEXT NOT NULL,
+                    source_collection TEXT NOT NULL,
+                    target_collection TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    processed_count INTEGER NOT NULL DEFAULT 0,
+                    skipped_count INTEGER NOT NULL DEFAULT 0,
+                    failed_count INTEGER NOT NULL DEFAULT 0,
+                    error TEXT
+                );
+                CREATE TABLE IF NOT EXISTS vector_index_locks (
+                    lock_name TEXT PRIMARY KEY,
+                    owner TEXT NOT NULL,
+                    acquired_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -131,6 +166,174 @@ class SQLiteStore:
             PaperChunk(chunk_id=row["chunk_id"], doc_id=row["doc_id"], page=row["page"], text=row["text"])
             for row in rows
         ]
+
+    def count_chunks(self) -> int:
+        """Return the number of SQLite source chunks."""
+        with self._connect() as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0])
+
+    def mark_vector_entries(
+        self,
+        chunks: list[PaperChunk],
+        profile_key: str,
+        collection_name: str,
+        content_hashes: dict[str, str],
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        """Upsert per-chunk vector indexing state."""
+        updated_at = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO vector_index_entries
+                    (chunk_id, profile_key, collection_name, content_hash, status, error, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(chunk_id, profile_key) DO UPDATE SET
+                    collection_name=excluded.collection_name,
+                    content_hash=excluded.content_hash,
+                    status=excluded.status,
+                    error=excluded.error,
+                    updated_at=excluded.updated_at
+                """,
+                [
+                    (
+                        chunk.chunk_id,
+                        profile_key,
+                        collection_name,
+                        content_hashes[chunk.chunk_id],
+                        status,
+                        error,
+                        updated_at,
+                    )
+                    for chunk in chunks
+                ],
+            )
+
+    def vector_entry_counts(self, profile_key: str) -> dict[str, int]:
+        """Return vector entry counts grouped by status."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) AS total FROM vector_index_entries WHERE profile_key = ? GROUP BY status",
+                (profile_key,),
+            ).fetchall()
+        return {str(row["status"]): int(row["total"]) for row in rows}
+
+    def set_vector_index_state(self, profile_key: str, state: str, active_collection: str | None) -> None:
+        """Atomically record the collection used for one embedding profile."""
+        updated_at = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO vector_index_state (profile_key, active_collection, state, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(profile_key) DO UPDATE SET
+                    active_collection=excluded.active_collection,
+                    state=excluded.state,
+                    updated_at=excluded.updated_at
+                """,
+                (profile_key, active_collection, state, updated_at),
+            )
+
+    def get_vector_index_state(self, profile_key: str) -> dict[str, str | None] | None:
+        """Return active collection state for a profile."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM vector_index_state WHERE profile_key = ?", (profile_key,)).fetchone()
+        return dict(row) if row else None
+
+    def acquire_vector_index_lock(self, owner: str) -> bool:
+        """Acquire the local migration lock, recovering one left by a dead process."""
+        acquired_at = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                "SELECT owner FROM vector_index_locks WHERE lock_name = 'migration'"
+            ).fetchone()
+            if existing and self._lock_owner_is_alive(str(existing["owner"])):
+                return False
+            conn.execute("DELETE FROM vector_index_locks WHERE lock_name = 'migration'")
+            conn.execute(
+                "INSERT INTO vector_index_locks (lock_name, owner, acquired_at) VALUES ('migration', ?, ?)",
+                (owner, acquired_at),
+            )
+        return True
+
+    @staticmethod
+    def _lock_owner_is_alive(owner: str) -> bool:
+        """Return whether a PID-prefixed migration owner still exists."""
+        try:
+            pid = int(owner.split(":", 1)[0])
+            os.kill(pid, 0)
+            return True
+        except PermissionError:
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def release_vector_index_lock(self, owner: str) -> None:
+        """Release a migration lock owned by the caller."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM vector_index_locks WHERE lock_name = 'migration' AND owner = ?", (owner,))
+
+    def vector_index_lock(self) -> dict[str, str] | None:
+        """Return current migration lock information."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM vector_index_locks WHERE lock_name = 'migration'").fetchone()
+        return dict(row) if row else None
+
+    def save_vector_migration(
+        self,
+        migration_id: str,
+        profile_key: str,
+        source_collection: str,
+        target_collection: str,
+        status: str,
+        processed_count: int = 0,
+        skipped_count: int = 0,
+        failed_count: int = 0,
+        error: str | None = None,
+    ) -> None:
+        """Create or update an idempotent vector migration run."""
+        now = datetime.now(timezone.utc).isoformat()
+        completed_at = now if status in {"complete", "failed"} else None
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO vector_index_migrations
+                    (migration_id, profile_key, source_collection, target_collection, status, started_at,
+                     completed_at, processed_count, skipped_count, failed_count, error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(migration_id) DO UPDATE SET
+                    status=excluded.status,
+                    completed_at=excluded.completed_at,
+                    processed_count=excluded.processed_count,
+                    skipped_count=excluded.skipped_count,
+                    failed_count=excluded.failed_count,
+                    error=excluded.error
+                """,
+                (
+                    migration_id,
+                    profile_key,
+                    source_collection,
+                    target_collection,
+                    status,
+                    now,
+                    completed_at,
+                    processed_count,
+                    skipped_count,
+                    failed_count,
+                    error,
+                ),
+            )
+
+    def latest_vector_migration(self, profile_key: str) -> dict[str, object] | None:
+        """Return the most recent migration for a profile."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM vector_index_migrations WHERE profile_key = ? ORDER BY started_at DESC LIMIT 1",
+                (profile_key,),
+            ).fetchone()
+        return dict(row) if row else None
 
     def save_gap(self, gap: GapItem) -> GapItem:
         """Persist a research gap result."""

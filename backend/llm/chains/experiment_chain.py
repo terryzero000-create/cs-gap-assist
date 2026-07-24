@@ -12,7 +12,10 @@ from backend.services.external_paper import ExternalPaper
 async def suggest_experiments(request: ExperimentSuggestRequest, settings: Settings) -> ExperimentSuggestResponse:
     """Generate literature-supported experiment plans for a research gap."""
     query = request.topic or request.gap_id
-    arxiv_papers, arxiv_warnings = await ArxivSearchClient(timeout_seconds=settings.external_search_timeout_seconds).search(
+    arxiv_papers, arxiv_warnings = await ArxivSearchClient(
+        timeout_seconds=settings.external_search_timeout_seconds,
+        enabled=settings.external_network_enabled,
+    ).search(
         query,
         limit=5,
     )

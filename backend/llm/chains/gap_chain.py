@@ -5,7 +5,6 @@ from typing import Any
 from backend.core.config import Settings
 from backend.llm.llm_service import get_chat_provider
 from backend.models.schemas import GapAnalysisRequest, GapAnalysisResponse, GapItem
-from backend.rag.vector_store import vector_store
 from backend.repositories.sqlite_store import SQLiteStore
 from backend.services.arxiv_search import ArxivSearchClient
 from backend.services.external_paper import ExternalPaper
@@ -13,12 +12,15 @@ from backend.services.external_paper import ExternalPaper
 
 async def analyze_research_gaps(request: GapAnalysisRequest, settings: Settings) -> GapAnalysisResponse:
     """Analyze research gaps from local papers and external literature evidence."""
-    arxiv_papers, arxiv_warnings = await ArxivSearchClient(timeout_seconds=settings.external_search_timeout_seconds).search(
+    arxiv_papers, arxiv_warnings = await ArxivSearchClient(
+        timeout_seconds=settings.external_search_timeout_seconds,
+        enabled=settings.external_network_enabled,
+    ).search(
         request.topic,
         limit=5,
     )
     evidence_pool = arxiv_papers
-    local_context = "\n".join(chunk.text for chunk in vector_store.all_chunks(request.doc_ids)[:5])
+    local_context = "\n".join(chunk.text for chunk in SQLiteStore(settings.sqlite_path).list_chunks(request.doc_ids)[:5])
     external_context = "\n".join(f"{paper.paper_id}: {paper.title}. {paper.abstract}" for paper in evidence_pool)
     prompt = (
         "GAP_JSON\n"

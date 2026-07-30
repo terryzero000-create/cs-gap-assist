@@ -36,7 +36,7 @@ Implemented:
 - Chroma-style vector store wrapper with in-memory fallback.
 - Vector filtering by `doc_id`, `tags`, and `module_source`.
 - DeepSeek chat provider abstraction with mock fallback.
-- OpenAI embedding provider abstraction with mock fallback.
+- XFYUN Spark embedding provider with separate `query`/`para` domains and protected lexical fallback.
 - React/Vite/TypeScript frontend skeleton and typed API client.
 - Project-level external literature policy: Semantic Scholar is deprecated and must not be used for new work.
 
@@ -113,7 +113,7 @@ Known limitations:
 
 - The frontend is a unified MVP surface, not a polished production workflow.
 - Cross-module deep links are not implemented yet.
-- Real DeepSeek/OpenAI/OpenAlex behavior still needs API keys and integration testing.
+- Real DeepSeek/XFYUN Spark/OpenAlex behavior still needs credentials and integration testing.
 - Research Plan Agent uses a bounded local state machine rather than LangGraph.
 - Research routes are display-only in the MVP; route save/edit/history is not implemented yet.
 - Reproduction Lab is independent from route planning and does not run code.
@@ -141,13 +141,13 @@ Implemented:
 Known limitations:
 
 - Answer generation uses provider fallback unless real DeepSeek key is configured.
-- Retrieval/answer quality needs real `DEEPSEEK_API_KEY` and `OPENAI_API_KEY` integration testing.
+- Retrieval/answer quality needs real `DEEPSEEK_API_KEY` and XFYUN Spark credential integration testing.
 - Full PDF viewer source highlighting is not implemented; source paragraphs and page numbers are displayed instead.
 
 Next steps:
 
 - Integrate a PDF viewer if exact in-document paragraph highlighting becomes required.
-- Run quality tests with real DeepSeek/OpenAI keys when available.
+- Run quality tests with real DeepSeek and XFYUN Spark credentials when available.
 
 Verification on branch:
 
@@ -193,13 +193,13 @@ Known limitations:
 
 - Branch is still isolated and has not been merged into an integration branch.
 - arXiv can fail in restricted or offline networks; deterministic fallback keeps the workflow usable.
-- DeepSeek/OpenAI real behavior needs API keys and quality evaluation.
+- DeepSeek/XFYUN Spark real behavior needs credentials and quality evaluation.
 - Gap ranking and evidence quality are MVP-level and should be evaluated against real papers before production use.
 
 Next steps:
 
 - Create or update an integration branch when combining feature modules.
-- Run real-key evaluation with `DEEPSEEK_API_KEY` and `OPENAI_API_KEY`.
+- Run real-credential evaluation with `DEEPSEEK_API_KEY` and XFYUN Spark credentials.
 - Add browser-level QA when a browser automation dependency is available.
 
 Verification on branch:

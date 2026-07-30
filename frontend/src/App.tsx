@@ -13,6 +13,7 @@ import {
   uploadPaper,
 } from './api/client';
 import { CitationForceGraph } from './components/CitationGraph/CitationForceGraph';
+import { EvidenceStatusBadge } from './components/EvidenceStatusBadge';
 import { ExperimentPlanCard } from './components/ExperimentSuggest/ExperimentPlanCard';
 import { GapList } from './components/GapAnalysis/GapList';
 import { KnowledgeBasePanel } from './components/KnowledgeBase/KnowledgeBasePanel';
@@ -20,6 +21,7 @@ import { ReadingQA } from './components/PaperUpload/ReadingQA';
 import './style.css';
 import type {
   CitationGraphResponse,
+  EvidenceStatus,
   ExperimentPlan,
   GapItem,
   PaperRecord,
@@ -138,11 +140,17 @@ function formatSystemWarning(warning: string): string {
   if (warning.includes('Local bge-m3 embedding request failed')) {
     return '本地 bge-m3 暂不可用。请启动 Ollama 并运行 `ollama pull bge-m3`，以启用本地语义检索。';
   }
-  if (warning.includes('OPENAI_API_KEY missing') || warning.includes('mock embeddings') || warning.includes('mock vectors')) {
-    return '当前使用本地测试向量。配置 OPENAI_API_KEY 后可启用生产级语义检索。';
+  if (warning.includes('mock embeddings') || warning.includes('mock vectors')) {
+    return '当前使用本地测试向量，检索效果仅供开发验证。';
   }
-  if (warning.includes('DEEPSEEK_API_KEY missing') || warning.includes('mock chat')) {
-    return '当前使用本地测试回答。配置 DEEPSEEK_API_KEY 后可启用真实模型输出。';
+  if (warning.includes('OPENAI_API_KEY missing')) {
+    return '当前选择的 OpenAI 对话模型不可用；请配置相应密钥或切换到 DeepSeek。';
+  }
+  if (warning.includes('DEEPSEEK_API_KEY missing')) {
+    return 'DeepSeek 当前不可用；系统已保留真实检索证据，但不会生成研究结论。';
+  }
+  if (warning.includes('Synthetic mock chat')) {
+    return '当前结果来自显式开发测试模型，不会写入可信历史。';
   }
   return warning;
 }
@@ -177,6 +185,7 @@ export function App() {
   const [gapPapers, setGapPapers] = useState<UploadedPaper[]>([]);
   const [gaps, setGaps] = useState<GapItem[]>([]);
   const [gapWarnings, setGapWarnings] = useState<string[]>([]);
+  const [gapEvidenceStatus, setGapEvidenceStatus] = useState<EvidenceStatus>();
   const [isUploadingGapPaper, setIsUploadingGapPaper] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isLoadingPapers, setIsLoadingPapers] = useState(false);
@@ -188,6 +197,7 @@ export function App() {
   const [experimentTopic, setExperimentTopic] = useState('');
   const [plans, setPlans] = useState<ExperimentPlan[]>([]);
   const [experimentWarnings, setExperimentWarnings] = useState<string[]>([]);
+  const [experimentEvidenceStatus, setExperimentEvidenceStatus] = useState<EvidenceStatus>();
   const [experimentError, setExperimentError] = useState<string | null>(null);
   const [isLoadingPlans, setIsLoadingPlans] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
@@ -352,6 +362,8 @@ export function App() {
       setGaps(result.gaps);
       setSelectedGapId((current) => current || result.gaps[0]?.gap_id || '');
       setGapWarnings(result.warnings);
+      setGapEvidenceStatus(result.evidence_status);
+      setGapEvidenceStatus(result.evidence_status);
     } catch (caught) {
       setGapError(readableClientError(caught, '分析失败。'));
     } finally {
@@ -411,6 +423,7 @@ export function App() {
       const result = await suggestExperiments(activeGapId, trimmedTopic.length > 0 ? trimmedTopic : undefined);
       setPlans(result.experiments);
       setExperimentWarnings(result.warnings);
+      setExperimentEvidenceStatus(result.evidence_status);
     } catch (caught) {
       setExperimentError(readableClientError(caught, '无法生成实验建议。'));
     } finally {
@@ -425,6 +438,7 @@ export function App() {
       const result = await listExperimentHistory(gapId);
       setPlans(result.experiments);
       setExperimentWarnings(result.warnings);
+      setExperimentEvidenceStatus(result.evidence_status);
     } catch (caught) {
       setExperimentError(readableClientError(caught, '无法加载实验历史。'));
     } finally {
@@ -668,6 +682,7 @@ export function App() {
                 ))}
               </ul>
             ) : null}
+            <EvidenceStatusBadge status={gapEvidenceStatus} />
             <GapList gaps={gaps} />
           </section>
         </section>
@@ -745,6 +760,7 @@ export function App() {
                 ))}
               </ul>
             ) : null}
+            <EvidenceStatusBadge status={experimentEvidenceStatus} />
             <div className="plans">
               {plans.length === 0 ? (
                 <p className="muted">实验方案会显示在这里。</p>
@@ -795,6 +811,7 @@ export function App() {
             {researchPlanResult?.warnings.length ? (
               <ul className="warning-list">{uniqueFormattedWarnings(researchPlanResult.warnings).map((warning) => <li key={warning}>{warning}</li>)}</ul>
             ) : null}
+            <EvidenceStatusBadge status={researchPlanResult?.evidence_status} />
             <div className="agent-grid">
               <section className="summary-panel">
                 <h2>Agent 执行过程</h2>
@@ -884,6 +901,7 @@ export function App() {
             {uniqueFormattedWarnings(citationGraph?.warnings ?? []).map((warning) => (
               <p className="warning" key={warning}>{warning}</p>
             ))}
+            <EvidenceStatusBadge status={citationGraph?.evidence_status} />
             <div className="citation-grid">
               <div className="graph-panel" aria-busy={isLoadingCitationGraph}>
                 {isLoadingCitationGraph ? (

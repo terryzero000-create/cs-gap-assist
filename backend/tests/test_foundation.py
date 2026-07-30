@@ -15,14 +15,14 @@ def test_health_check_returns_ok() -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_missing_model_key_uses_mock_provider() -> None:
+def test_explicit_test_runtime_exposes_mock_provider() -> None:
     client = TestClient(app)
 
     response = client.get("/api/v1/config/models")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["default_chat_model"] == "deepseek-v4-pro"
+    assert body["default_chat_model"] == "mock-chat"
     assert body["providers"]["chat"][0]["provider"] == "deepseek"
     assert "mock" in {item["provider"] for item in body["providers"]["chat"]}
 

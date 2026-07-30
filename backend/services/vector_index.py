@@ -43,7 +43,17 @@ def lexical_chunk_search(chunks: list[PaperChunk], query: str, top_k: int) -> li
 
 def _tokens(text: str) -> set[str]:
     normalized = text.casefold()
-    latin = set(re.findall(r"[a-z0-9_]{2,}", normalized))
+    words = re.findall(r"[a-z0-9_]{2,}", normalized)
+    latin = set(words)
+    for word in words:
+        for suffix in ("ing", "ed", "es", "s"):
+            if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+                latin.add(word[: -len(suffix)])
+                break
+    latin.update(
+        "".join(word[0] for word in words[index : index + 3])
+        for index in range(max(len(words) - 2, 0))
+    )
     cjk = "".join(re.findall(r"[\u3400-\u9fff]", normalized))
     bigrams = {cjk[index : index + 2] for index in range(max(len(cjk) - 1, 0))}
     return latin | bigrams

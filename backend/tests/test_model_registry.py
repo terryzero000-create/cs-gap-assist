@@ -23,14 +23,21 @@ def test_chat_model_registry_lists_configured_options() -> None:
 
 def test_embedding_model_registry_lists_configured_options() -> None:
     """Embedding model choices are exposed from a single registry."""
-    settings = Settings(openai_api_key=None, local_bge_m3_model="bge-m3")
+    settings = Settings(
+        local_bge_m3_model="bge-m3",
+        xfyun_spark_app_id="app",
+        xfyun_spark_api_key="key",
+        xfyun_spark_api_secret="secret",
+    )
 
     options = list_embedding_model_options(settings)
 
-    assert [option.provider for option in options] == ["local-bge-m3", "openai", "xfyun-spark", "mock"]
+    assert [option.provider for option in options] == ["local-bge-m3", "xfyun-spark", "mock"]
     assert any(option.provider == "local-bge-m3" and option.model == "bge-m3" for option in options)
-    assert any(option.provider == "openai" and option.available is False for option in options)
-    assert any(option.provider == "xfyun-spark" and option.model == "query" for option in options)
+    assert any(
+        option.provider == "xfyun-spark" and option.model == "query" and option.available is True
+        for option in options
+    )
 
 
 def test_get_chat_provider_resolves_registered_openai_provider() -> None:

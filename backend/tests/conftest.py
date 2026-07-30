@@ -12,8 +12,8 @@ def isolated_runtime(tmp_path, monkeypatch) -> Iterator[None]:
     """Keep every test offline and isolated from local application data."""
     monkeypatch.setenv("SQLITE_URL", str(tmp_path / "app.db"))
     monkeypatch.setenv("CHROMA_DIR", str(tmp_path / "chroma"))
-    monkeypatch.setenv("DEFAULT_CHAT_PROVIDER", "deepseek")
-    monkeypatch.setenv("DEFAULT_CHAT_MODEL", "deepseek-v4-pro")
+    monkeypatch.setenv("DEFAULT_CHAT_PROVIDER", "mock")
+    monkeypatch.setenv("DEFAULT_CHAT_MODEL", "mock-chat")
     monkeypatch.setenv("DEFAULT_EMBEDDING_PROVIDER", "mock")
     monkeypatch.setenv("DEFAULT_EMBEDDING_MODEL", "mock-embedding")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "")

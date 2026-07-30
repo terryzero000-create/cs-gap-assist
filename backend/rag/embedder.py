@@ -11,7 +11,7 @@ from backend.core.config import Settings
 from backend.models.schemas import ModelOption
 
 
-VECTOR_INDEX_SCHEMA_VERSION = 2
+VECTOR_INDEX_SCHEMA_VERSION = 3
 
 
 def _normalized_vector(text: str, dimension: int) -> list[float]:
@@ -20,7 +20,7 @@ def _normalized_vector(text: str, dimension: int) -> list[float]:
     counter = 0
     while len(values) < dimension:
         digest = hashlib.sha256(f"{counter}:{text}".encode("utf-8")).digest()
-        values.extend(float(byte) / 255.0 for byte in digest)
+        values.extend((float(byte) - 127.5) / 127.5 for byte in digest)
         counter += 1
     raw = values[:dimension]
     norm = math.sqrt(sum(value * value for value in raw)) or 1.0
@@ -85,32 +85,6 @@ class MockEmbeddingProvider(EmbeddingProvider):
     def _vectorize(self, text: str) -> list[float]:
         """Convert text into a normalized deterministic vector."""
         return _normalized_vector(text, self.profile.dimension)
-
-
-class OpenAIEmbeddingProvider(EmbeddingProvider):
-    """OpenAI embedding provider placeholder with safe local fallback."""
-
-    def __init__(self, settings: Settings, model: str | None = None) -> None:
-        """Create an OpenAI embedding provider."""
-        self.settings = settings
-        self.model = model or settings.default_embedding_model
-        self.profile = EmbeddingProfile(provider="openai", model=self.model, dimension=1536)
-
-    async def embed(self, texts: list[str]) -> EmbeddingResult:
-        """Embed texts or fall back to mock vectors when no key is configured."""
-        if not self.settings.openai_api_key:
-            return EmbeddingResult(
-                vectors=[_normalized_vector(text, self.profile.dimension) for text in texts],
-                warnings=[f"OPENAI_API_KEY missing; embedding request fell back instead of {self.model}."],
-                profile=self.profile,
-                is_fallback=True,
-            )
-        return EmbeddingResult(
-            vectors=[_normalized_vector(text, self.profile.dimension) for text in texts],
-            warnings=[f"OpenAI embedding call is not enabled; request fell back for {self.model}."],
-            profile=self.profile,
-            is_fallback=True,
-        )
 
 
 class LocalBgeM3EmbeddingProvider(EmbeddingProvider):
@@ -319,10 +293,6 @@ def _local_bge_m3_factory(settings: Settings, model: str | None) -> EmbeddingPro
     return LocalBgeM3EmbeddingProvider(settings, model)
 
 
-def _openai_factory(settings: Settings, model: str | None) -> EmbeddingProvider:
-    return OpenAIEmbeddingProvider(settings, model)
-
-
 def _mock_factory(settings: Settings, model: str | None) -> EmbeddingProvider:
     return MockEmbeddingProvider(model or "mock-embedding")
 
@@ -342,13 +312,6 @@ EMBEDDING_MODEL_REGISTRY: tuple[EmbeddingModelRegistration, ...] = (
         ),
     ),
     EmbeddingModelRegistration(
-        provider="openai",
-        model=lambda settings: "text-embedding-3-small",
-        factory=_openai_factory,
-        available=lambda settings: bool(settings.openai_api_key),
-        warning=lambda settings: None if settings.openai_api_key else "OPENAI_API_KEY missing; mock fallback will be used.",
-    ),
-    EmbeddingModelRegistration(
         provider="xfyun-spark",
         model=lambda settings: "query",  # "query" or "para"
         factory=_xfyun_spark_factory,
@@ -356,7 +319,7 @@ EMBEDDING_MODEL_REGISTRY: tuple[EmbeddingModelRegistration, ...] = (
         warning=lambda settings: (
             None
             if settings.xfyun_spark_app_id and settings.xfyun_spark_api_key and settings.xfyun_spark_api_secret
-            else "XFYUN_SPARK credentials (app_id, api_key, api_secret) not fully configured; mock fallback will be used."
+            else "XFYUN_SPARK credentials are incomplete; semantic retrieval will use lexical fallback."
         ),
     ),
     EmbeddingModelRegistration(
@@ -388,4 +351,4 @@ def get_embedding_provider(settings: Settings, provider: str | None = None, mode
     for entry in EMBEDDING_MODEL_REGISTRY:
         if entry.provider == selected:
             return entry.factory(settings, model)
-    return MockEmbeddingProvider()
+    raise ValueError(f"Unsupported embedding provider: {selected}")

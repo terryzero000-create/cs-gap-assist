@@ -21,9 +21,16 @@ export function GapList({ gaps }: GapListProps) {
           <div className="evidence-block">
             <span>证据论文</span>
             <ul>
-              {gap.evidence_papers.map((paper) => (
-                <li key={paper}>{paper}</li>
-              ))}
+              {gap.evidence_refs.length > 0
+                ? gap.evidence_refs.map((reference) => (
+                  <li key={reference.id}>
+                    {reference.canonical_url.startsWith('http') ? (
+                      <a href={reference.canonical_url} rel="noreferrer" target="_blank">{reference.title}</a>
+                    ) : reference.title}
+                    <small> · {reference.id}</small>
+                  </li>
+                ))
+                : gap.evidence_papers.map((paper) => <li key={paper}>{paper}</li>)}
             </ul>
           </div>
         </article>

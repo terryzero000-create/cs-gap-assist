@@ -10,6 +10,19 @@ export interface ModelConfig {
   embedding_model?: string;
 }
 
+export type EvidenceStatus = 'verified' | 'local_only' | 'insufficient_evidence' | 'provider_unavailable' | 'synthetic';
+export type TrustStatus = 'verified' | 'local_only' | 'synthetic' | 'legacy_unverified';
+
+export interface EvidenceRef {
+  source: 'local' | 'arxiv' | 'openalex';
+  id: string;
+  title: string;
+  canonical_url: string;
+  doc_id?: string | null;
+  chunk_id?: string | null;
+  page?: number | null;
+}
+
 export interface PaperUploadResponse {
   doc_id: string;
   title: string;
@@ -53,6 +66,7 @@ export interface SourceParagraph {
 export interface ReadingQAResponse {
   answer: string;
   sources: SourceParagraph[];
+  evidence_status: EvidenceStatus;
   warnings: string[];
 }
 
@@ -70,11 +84,14 @@ export interface GapItem {
   value_level: 'high' | 'mid';
   description: string;
   evidence_papers: string[];
+  evidence_refs: EvidenceRef[];
+  trust_status: TrustStatus;
   created_at: string;
 }
 
 export interface GapAnalysisResponse {
   gaps: GapItem[];
+  evidence_status: EvidenceStatus;
   warnings: string[];
 }
 
@@ -88,10 +105,13 @@ export interface ExperimentPlan {
   steps: string[];
   risks: string[];
   support_papers: string[];
+  support_refs: EvidenceRef[];
+  trust_status: TrustStatus;
 }
 
 export interface ExperimentSuggestResponse {
   experiments: ExperimentPlan[];
+  evidence_status: EvidenceStatus;
   warnings: string[];
 }
 
@@ -179,6 +199,7 @@ export interface ResearchPlanAgentResponse {
   agent_steps: ResearchPlanAgentStep[];
   routes: ResearchPlanRoute[];
   final_cards: ResearchPlanCard[];
+  evidence_status: EvidenceStatus;
   warnings: string[];
 }
 
@@ -199,6 +220,7 @@ export interface CitationLink {
 export interface CitationGraphResponse {
   nodes: CitationNode[];
   links: CitationLink[];
+  evidence_status: EvidenceStatus;
   warnings: string[];
 }
 

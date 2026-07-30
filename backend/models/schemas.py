@@ -7,12 +7,33 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ValueLevel = Literal["high", "mid"]
 ReproductionMode = Literal["standard", "focused", "template"]
+EvidenceStatus = Literal["verified", "local_only", "insufficient_evidence", "provider_unavailable", "synthetic"]
+EvidenceSource = Literal["local", "arxiv", "openalex"]
+TrustStatus = Literal["verified", "local_only", "synthetic", "legacy_unverified"]
 
 
 class WarningMixin(BaseModel):
     """Common response fields for recoverable system warnings."""
 
     warnings: list[str] = Field(default_factory=list)
+
+
+class EvidenceResponseMixin(WarningMixin):
+    """Response metadata describing whether conclusions are backed by trusted evidence."""
+
+    evidence_status: EvidenceStatus = "verified"
+
+
+class EvidenceRef(BaseModel):
+    """Canonical reference to evidence admitted by a trusted retrieval source."""
+
+    source: EvidenceSource
+    id: str
+    title: str
+    canonical_url: str
+    doc_id: str | None = None
+    chunk_id: str | None = None
+    page: int | None = None
 
 
 class ModelOption(BaseModel):
@@ -139,7 +160,7 @@ class SourceParagraph(BaseModel):
     score: float
 
 
-class ReadingQAResponse(WarningMixin):
+class ReadingQAResponse(EvidenceResponseMixin):
     """Answer with paragraph-level sources."""
 
     answer: str
@@ -154,6 +175,8 @@ class GapItem(BaseModel):
     value_level: ValueLevel
     description: str
     evidence_papers: list[str]
+    evidence_refs: list[EvidenceRef] = Field(default_factory=list)
+    trust_status: TrustStatus = "legacy_unverified"
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -167,7 +190,7 @@ class GapAnalysisRequest(BaseModel):
     runtime_model_config: ModelConfig | None = Field(default=None, alias="model_config")
 
 
-class GapAnalysisResponse(WarningMixin):
+class GapAnalysisResponse(EvidenceResponseMixin):
     """Structured gap analysis result."""
 
     gaps: list[GapItem]
@@ -180,6 +203,7 @@ class ExperimentSuggestRequest(BaseModel):
 
     gap_id: str
     topic: str | None = None
+    evidence_refs: list[EvidenceRef] = Field(default_factory=list)
     runtime_model_config: ModelConfig | None = Field(default=None, alias="model_config")
 
 
@@ -195,9 +219,11 @@ class ExperimentPlan(BaseModel):
     steps: list[str]
     risks: list[str]
     support_papers: list[str]
+    support_refs: list[EvidenceRef] = Field(default_factory=list)
+    trust_status: TrustStatus = "legacy_unverified"
 
 
-class ExperimentSuggestResponse(WarningMixin):
+class ExperimentSuggestResponse(EvidenceResponseMixin):
     """Experiment suggestion response."""
 
     experiments: list[ExperimentPlan]
@@ -302,7 +328,7 @@ class ResearchPlanRoute(BaseModel):
     experiments: list[ExperimentPlan] = Field(default_factory=list)
 
 
-class ResearchPlanAgentResponse(WarningMixin):
+class ResearchPlanAgentResponse(EvidenceResponseMixin):
     """Research planning agent trace and final execution cards."""
 
     agent_steps: list[ResearchPlanAgentStep]
@@ -328,7 +354,7 @@ class CitationLink(BaseModel):
     relation: str = "cites"
 
 
-class CitationGraphResponse(WarningMixin):
+class CitationGraphResponse(EvidenceResponseMixin):
     """Citation graph response for D3 force layout."""
 
     nodes: list[CitationNode]

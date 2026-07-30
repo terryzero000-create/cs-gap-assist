@@ -135,6 +135,7 @@ class ChromaVectorStore:
     @staticmethod
     def _profile_metadata(profile: EmbeddingProfile) -> dict[str, str | int]:
         return {
+            "hnsw:space": "cosine",
             "schema_version": profile.schema_version,
             "embedding_provider": profile.provider,
             "embedding_model": profile.model,
@@ -222,7 +223,7 @@ class ChromaVectorStore:
             stored_tags = set(json.loads(metadata.get("tags", "[]")))
             if required_tags and not required_tags.issubset(stored_tags):
                 continue
-            score = 1.0 / (1.0 + max(float(distance), 0.0))
+            score = max(-1.0, min(1.0, 1.0 - float(distance)))
             chunks.append(
                 PaperChunk(
                     chunk_id=chunk_id,

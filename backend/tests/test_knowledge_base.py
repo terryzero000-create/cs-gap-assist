@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 from backend.core.config import get_settings
 from backend.main import app
-from backend.models.schemas import ExperimentPlan, GapItem
+from backend.models.schemas import EvidenceRef, ExperimentPlan, GapItem, PaperChunk
 from backend.repositories.sqlite_store import SQLiteStore
 
 
@@ -67,13 +67,29 @@ def test_knowledge_base_updates_paper_collection_metadata() -> None:
 def test_knowledge_search_includes_gap_and_experiment_history() -> None:
     client = TestClient(app)
     store = SQLiteStore(get_settings().sqlite_path)
+    store.add_paper(
+        "doc-robustness",
+        "Robustness Evidence",
+        [PaperChunk(chunk_id="chunk-robustness", doc_id="doc-robustness", page=1, text="cross-domain evidence")],
+    )
+    evidence = EvidenceRef(
+        source="local",
+        id="local:doc-robustness:chunk-robustness",
+        title="Robustness Evidence",
+        canonical_url="/api/v1/knowledge/papers/doc-robustness#chunk-chunk-robustness",
+        doc_id="doc-robustness",
+        chunk_id="chunk-robustness",
+        page=1,
+    )
     gap = store.save_gap(
         GapItem(
             gap_id="kb-gap-robustness",
             title="Robustness gap",
             value_level="high",
             description="Evaluate retrieval robustness with cross-domain evidence.",
-            evidence_papers=["doc-robustness"],
+            evidence_papers=[evidence.id],
+            evidence_refs=[evidence],
+            trust_status="local_only",
         )
     )
     experiment = store.save_experiment(
@@ -86,7 +102,9 @@ def test_knowledge_search_includes_gap_and_experiment_history() -> None:
             baselines=["BM25"],
             steps=["Run retrieval benchmark"],
             risks=["Dataset bias"],
-            support_papers=["doc-robustness", "paper-2", "paper-3"],
+            support_papers=[evidence.id],
+            support_refs=[evidence],
+            trust_status="local_only",
         )
     )
 

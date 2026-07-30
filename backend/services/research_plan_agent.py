@@ -7,6 +7,7 @@ from backend.llm.chains.gap_chain import analyze_research_gaps
 from backend.models.schemas import (
     ExperimentPlan,
     ExperimentSuggestRequest,
+    EvidenceStatus,
     GapAnalysisRequest,
     GapItem,
     PaperChunk,
@@ -18,6 +19,7 @@ from backend.models.schemas import (
 )
 from backend.repositories.sqlite_store import SQLiteStore
 from backend.services.arxiv_search import ArxivSearchClient
+from backend.services.evidence_retriever import EvidenceRetriever
 
 
 MAX_STEPS = 10
@@ -39,6 +41,7 @@ class ResearchPlanState:
     warnings: list[str] = field(default_factory=list)
     routes: list[ResearchPlanRoute] = field(default_factory=list)
     final_cards: list[ResearchPlanCard] = field(default_factory=list)
+    evidence_status: EvidenceStatus = "insufficient_evidence"
 
 
 class ResearchPlanAgentService:
@@ -80,7 +83,13 @@ class ResearchPlanAgentService:
         if not state.final_cards:
             state.warnings.append("Agent reached max_steps before report generation; returning partial cards.")
             await self.research_report_tool(state)
-        return ResearchPlanAgentResponse(agent_steps=state.agent_steps, routes=state.routes, final_cards=state.final_cards, warnings=state.warnings)
+        return ResearchPlanAgentResponse(
+            agent_steps=state.agent_steps,
+            routes=state.routes,
+            final_cards=state.final_cards,
+            evidence_status=state.evidence_status,
+            warnings=state.warnings,
+        )
 
     def decide_next_tool(self, state: ResearchPlanState) -> str:
         """Choose the next tool from state, not from a blind fixed pipeline."""
@@ -89,19 +98,19 @@ class ResearchPlanAgentService:
             return "understand_goal"
         if not state.planned_tools:
             return "plan_steps"
-        if not state.retrieved_context:
+        if "knowledge_search_tool" not in completed:
             return "knowledge_search_tool"
-        if not state.paper_summary:
+        if "paper_summary_tool" not in completed:
             return "paper_summary_tool"
-        if not state.gaps:
+        if "gap_analysis_tool" not in completed:
             return "gap_analysis_tool"
-        if not state.top_gaps:
+        if "select_top_3_gaps" not in completed:
             return "select_top_3_gaps"
-        if not state.experiment_suggestions:
+        if "experiment_suggestion_tool" not in completed:
             return "experiment_suggestion_tool"
-        if not state.recommended_papers:
+        if "paper_recommendation_tool" not in completed:
             return "paper_recommendation_tool"
-        if not state.final_cards:
+        if "research_report_tool" not in completed:
             return "research_report_tool"
         return "done"
 
@@ -124,8 +133,15 @@ class ResearchPlanAgentService:
         return "Plan created: retrieve context, summarize papers, analyze gaps, suggest experiments, recommend papers, generate cards."
 
     async def knowledge_search_tool(self, state: ResearchPlanState) -> str:
-        chunks = self.store.list_chunks(state.request.selected_paper_ids)
-        state.retrieved_context = self._rank_chunks(chunks, state.request.research_direction)[:8]
+        retrieval = await EvidenceRetriever(self.settings, self.store).retrieve(
+            state.request.research_direction,
+            state.request.selected_paper_ids,
+            top_k=5,
+        )
+        state.retrieved_context = retrieval.chunks
+        state.warnings.extend(retrieval.warnings)
+        if retrieval.chunks:
+            state.evidence_status = "local_only"
         return f"Retrieved {len(state.retrieved_context)} context chunks from {len(state.request.selected_paper_ids)} selected paper(s)."
 
     async def paper_summary_tool(self, state: ResearchPlanState) -> str:
@@ -144,6 +160,7 @@ class ResearchPlanAgentService:
             self.settings,
         )
         state.gaps = response.gaps
+        state.evidence_status = response.evidence_status
         state.warnings.extend(response.warnings)
         return f"Analyzed {len(state.gaps)} research gap(s)."
 
@@ -161,25 +178,35 @@ class ResearchPlanAgentService:
                 ExperimentSuggestRequest(
                     gap_id=gap.gap_id,
                     topic=topic,
+                    evidence_refs=gap.evidence_refs,
                     model_config=state.request.runtime_model_config,
                 ),
                 self.settings,
             )
             plans.extend(response.experiments[:1])
+            state.evidence_status = self._stronger_status(state.evidence_status, response.evidence_status)
             state.warnings.extend(response.warnings)
         state.experiment_suggestions = plans
         return f"Generated {len(plans)} experiment suggestion(s) for selected gaps."
 
     async def paper_recommendation_tool(self, state: ResearchPlanState) -> str:
         query = " ".join([state.request.research_direction, *[gap.title for gap in state.top_gaps]])
-        papers, warnings = await ArxivSearchClient(timeout_seconds=self.settings.external_search_timeout_seconds).search(query, limit=5)
+        papers, warnings = await ArxivSearchClient(
+            base_url=self.settings.arxiv_base_url,
+            timeout_seconds=self.settings.external_search_timeout_seconds,
+            enabled=self.settings.external_network_enabled,
+            user_agent=self.settings.arxiv_user_agent,
+            min_interval_seconds=self.settings.arxiv_min_interval_seconds,
+            cache_ttl_seconds=self.settings.arxiv_cache_ttl_seconds,
+        ).search(query, limit=5)
         state.warnings.extend(warnings)
         state.recommended_papers = [f"{paper.paper_id}: {paper.title}" for paper in papers]
         if not state.recommended_papers:
             fallback = [paper for gap in state.top_gaps for paper in gap.evidence_papers]
             fallback.extend(paper for plan in state.experiment_suggestions for paper in plan.support_papers)
             state.recommended_papers = list(dict.fromkeys(fallback))[:5]
-            state.warnings.append("No new arXiv recommendations found; reused evidence and support papers.")
+            if state.recommended_papers:
+                state.warnings.append("No new arXiv recommendations found; reused verified evidence and support papers.")
         return f"Recommended {len(state.recommended_papers)} follow-up paper(s)."
 
     async def research_report_tool(self, state: ResearchPlanState) -> str:
@@ -208,12 +235,6 @@ class ResearchPlanAgentService:
         state.final_cards = cards
         return f"Generated {len(cards)} research execution card(s)."
 
-    def _rank_chunks(self, chunks: list[PaperChunk], direction: str) -> list[PaperChunk]:
-        terms = {term.lower() for term in direction.split() if term.strip()}
-        if not terms:
-            return chunks
-        return sorted(chunks, key=lambda chunk: sum(term in chunk.text.lower() for term in terms), reverse=True)
-
     def _entry_point(self, gap: GapItem) -> str:
         return f"从“{gap.title}”入手，先复现实有证据，再补齐 {gap.value_level} 价值缺口。"
 
@@ -240,3 +261,14 @@ class ResearchPlanAgentService:
             "research_report_tool": "把中间结果压缩成可执行课题卡。",
         }
         return thoughts[tool_name]
+
+    @staticmethod
+    def _stronger_status(current: EvidenceStatus, candidate: EvidenceStatus) -> EvidenceStatus:
+        priority: dict[EvidenceStatus, int] = {
+            "insufficient_evidence": 0,
+            "provider_unavailable": 1,
+            "synthetic": 2,
+            "local_only": 3,
+            "verified": 4,
+        }
+        return candidate if priority[candidate] > priority[current] else current

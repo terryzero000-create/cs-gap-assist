@@ -36,13 +36,14 @@ def test_reading_qa_answer_uses_numbered_source_citations() -> None:
 
     response = client.post(
         "/api/v1/reading/qa",
-        json={"question": "Why are citations useful?", "doc_ids": [doc_id], "top_k": 1},
+        json={"question": "What helps readers verify generated answers?", "doc_ids": [doc_id], "top_k": 1},
     )
 
     assert response.status_code == 200
     body = response.json()
     assert "[1]" in body["answer"]
     assert len(body["sources"]) == 1
+    assert body["evidence_status"] == "synthetic"
 
 
 def test_reading_qa_reports_insufficient_evidence_without_sources() -> None:
@@ -58,6 +59,7 @@ def test_reading_qa_reports_insufficient_evidence_without_sources() -> None:
     assert body["sources"] == []
     assert "证据不足" in body["answer"]
     assert "[1]" not in body["answer"]
+    assert body["evidence_status"] == "insufficient_evidence"
 
 
 def test_reading_qa_rejects_empty_question_and_doc_ids() -> None:

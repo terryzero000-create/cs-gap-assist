@@ -1,10 +1,19 @@
 import json
 import os
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from backend.models.schemas import ExperimentPlan, GapItem, NoteCreateRequest, NoteRecord, PaperChunk, PaperRecord
+from backend.models.schemas import (
+    EvidenceRef,
+    ExperimentPlan,
+    GapItem,
+    NoteCreateRequest,
+    NoteRecord,
+    PaperChunk,
+    PaperRecord,
+)
 
 
 class SQLiteStore:
@@ -46,6 +55,8 @@ class SQLiteStore:
                     value_level TEXT NOT NULL,
                     description TEXT NOT NULL,
                     evidence_papers TEXT NOT NULL,
+                    evidence_refs TEXT NOT NULL DEFAULT '[]',
+                    trust_status TEXT NOT NULL DEFAULT 'legacy_unverified',
                     created_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS experiments (
@@ -57,7 +68,9 @@ class SQLiteStore:
                     baselines TEXT NOT NULL,
                     steps TEXT NOT NULL,
                     risks TEXT NOT NULL,
-                    support_papers TEXT NOT NULL
+                    support_papers TEXT NOT NULL,
+                    support_refs TEXT NOT NULL DEFAULT '[]',
+                    trust_status TEXT NOT NULL DEFAULT 'legacy_unverified'
                 );
                 CREATE TABLE IF NOT EXISTS notes (
                     note_id TEXT PRIMARY KEY,
@@ -104,6 +117,17 @@ class SQLiteStore:
                 );
                 """
             )
+            self._ensure_column(conn, "gaps", "evidence_refs", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(conn, "gaps", "trust_status", "TEXT NOT NULL DEFAULT 'legacy_unverified'")
+            self._ensure_column(conn, "experiments", "support_refs", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(conn, "experiments", "trust_status", "TEXT NOT NULL DEFAULT 'legacy_unverified'")
+
+    @staticmethod
+    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
+        """Add one backward-compatible SQLite column when an older database lacks it."""
+        columns = {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
     def add_paper(
         self,
@@ -336,18 +360,41 @@ class SQLiteStore:
         return dict(row) if row else None
 
     def save_gap(self, gap: GapItem) -> GapItem:
-        """Persist a research gap result."""
+        """Persist a gap only when every evidence reference passes server-side validation."""
+        if gap.trust_status not in {"verified", "local_only"}:
+            raise ValueError("Only verified or local-only gaps may be persisted.")
+        trusted_refs = self.trusted_evidence_refs(gap.evidence_refs)
+        if not trusted_refs or len(trusted_refs) != len(gap.evidence_refs):
+            raise ValueError("Gap evidence could not be verified.")
         with self._connect() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO gaps VALUES (?, ?, ?, ?, ?, ?)",
-                (gap.gap_id, gap.title, gap.value_level, gap.description, json.dumps(gap.evidence_papers), gap.created_at),
+                """
+                INSERT OR REPLACE INTO gaps
+                    (gap_id, title, value_level, description, evidence_papers, evidence_refs, trust_status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    gap.gap_id,
+                    gap.title,
+                    gap.value_level,
+                    gap.description,
+                    json.dumps([ref.id for ref in trusted_refs]),
+                    json.dumps([ref.model_dump() for ref in trusted_refs]),
+                    gap.trust_status,
+                    gap.created_at,
+                ),
             )
         return gap
 
-    def list_gaps(self) -> list[GapItem]:
+    def list_gaps(self, include_unverified: bool = False) -> list[GapItem]:
         """Return stored gap results."""
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM gaps ORDER BY created_at DESC").fetchall()
+            if include_unverified:
+                rows = conn.execute("SELECT * FROM gaps ORDER BY created_at DESC").fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM gaps WHERE trust_status IN ('verified', 'local_only') ORDER BY created_at DESC"
+                ).fetchall()
         return [
             GapItem(
                 gap_id=row["gap_id"],
@@ -355,16 +402,28 @@ class SQLiteStore:
                 value_level=row["value_level"],
                 description=row["description"],
                 evidence_papers=json.loads(row["evidence_papers"]),
+                evidence_refs=[EvidenceRef.model_validate(item) for item in json.loads(row["evidence_refs"])],
+                trust_status=row["trust_status"],
                 created_at=row["created_at"],
             )
             for row in rows
         ]
 
     def save_experiment(self, experiment: ExperimentPlan) -> ExperimentPlan:
-        """Persist an experiment suggestion history item."""
+        """Persist an experiment only when every support reference is trusted."""
+        if experiment.trust_status not in {"verified", "local_only"}:
+            raise ValueError("Only verified or local-only experiments may be persisted.")
+        trusted_refs = self.trusted_evidence_refs(experiment.support_refs)
+        if not trusted_refs or len(trusted_refs) != len(experiment.support_refs):
+            raise ValueError("Experiment support evidence could not be verified.")
         with self._connect() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO experiments VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                """
+                INSERT OR REPLACE INTO experiments
+                    (experiment_id, gap_id, objective, datasets, metrics, baselines, steps, risks,
+                     support_papers, support_refs, trust_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
                     experiment.experiment_id,
                     experiment.gap_id,
@@ -374,18 +433,29 @@ class SQLiteStore:
                     json.dumps(experiment.baselines),
                     json.dumps(experiment.steps),
                     json.dumps(experiment.risks),
-                    json.dumps(experiment.support_papers),
+                    json.dumps([ref.id for ref in trusted_refs]),
+                    json.dumps([ref.model_dump() for ref in trusted_refs]),
+                    experiment.trust_status,
                 ),
             )
         return experiment
 
-    def list_experiments(self, gap_id: str | None = None) -> list[ExperimentPlan]:
+    def list_experiments(
+        self,
+        gap_id: str | None = None,
+        include_unverified: bool = False,
+    ) -> list[ExperimentPlan]:
         """Return stored experiment suggestion history."""
+        conditions: list[str] = []
+        params: list[str] = []
+        if gap_id:
+            conditions.append("gap_id = ?")
+            params.append(gap_id)
+        if not include_unverified:
+            conditions.append("trust_status IN ('verified', 'local_only')")
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         with self._connect() as conn:
-            if gap_id:
-                rows = conn.execute("SELECT * FROM experiments WHERE gap_id = ?", (gap_id,)).fetchall()
-            else:
-                rows = conn.execute("SELECT * FROM experiments").fetchall()
+            rows = conn.execute(f"SELECT * FROM experiments{where}", params).fetchall()
         return [
             ExperimentPlan(
                 experiment_id=row["experiment_id"],
@@ -397,9 +467,47 @@ class SQLiteStore:
                 steps=json.loads(row["steps"]),
                 risks=json.loads(row["risks"]),
                 support_papers=json.loads(row["support_papers"]),
+                support_refs=[EvidenceRef.model_validate(item) for item in json.loads(row["support_refs"])],
+                trust_status=row["trust_status"],
             )
             for row in rows
         ]
+
+    def trusted_evidence_refs(self, refs: list[EvidenceRef]) -> list[EvidenceRef]:
+        """Revalidate structured references immediately before persistence or reuse."""
+        trusted: list[EvidenceRef] = []
+        seen: set[str] = set()
+        for ref in refs:
+            if ref.id in seen:
+                continue
+            if ref.source == "local":
+                if not ref.doc_id or not ref.chunk_id or ref.page is None:
+                    continue
+                with self._connect() as conn:
+                    row = conn.execute(
+                        "SELECT doc_id, page FROM chunks WHERE chunk_id = ?",
+                        (ref.chunk_id,),
+                    ).fetchone()
+                if row is None or row["doc_id"] != ref.doc_id or int(row["page"]) != ref.page:
+                    continue
+            elif ref.source == "arxiv":
+                arxiv_id = ref.id.removeprefix("arxiv-")
+                if (
+                    not ref.id.startswith("arxiv-")
+                    or arxiv_id.isdigit()
+                    or not re.fullmatch(r"[A-Za-z0-9./-]+", arxiv_id)
+                    or "arxiv.org/abs/" not in ref.canonical_url
+                ):
+                    continue
+            elif ref.source == "openalex":
+                openalex_id = ref.id.removeprefix("openalex-")
+                if not re.fullmatch(r"W\d+", openalex_id) or "openalex.org/" not in ref.canonical_url:
+                    continue
+            else:
+                continue
+            trusted.append(ref)
+            seen.add(ref.id)
+        return trusted
 
     def add_note(self, request: NoteCreateRequest) -> NoteRecord:
         """Persist a knowledge-base note."""

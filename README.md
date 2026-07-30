@@ -19,7 +19,7 @@ CS Gap Assist 是一个面向计算机科学论文的研究规划助手。它把
 
 - Backend: FastAPI, Pydantic, SQLite, optional Chroma mirror, pytest
 - Frontend: React, Vite, TypeScript, D3
-- Model layer: DeepSeek chat provider, OpenAI/local embedding options, deterministic mock fallback
+- Model layer: DeepSeek/optional OpenAI chat providers, XFYUN Spark embedding, local development fallbacks
 - Literature sources: arXiv by default; OpenAlex is optional for citation graph expansion
 
 Semantic Scholar 已废弃，不用于新的文献检索或引用图谱流程。
@@ -52,7 +52,7 @@ macOS/Linux:
 cp .env.example .env
 ```
 
-没有真实 API key 也可以运行。缺少 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY` 时，系统会使用本地 mock provider 并返回 warning。
+缺少 `DEEPSEEK_API_KEY` 时，聊天请求会使用本地 mock provider 并返回 warning。正式论文索引默认使用讯飞 Spark Embedding；请配置完整的讯飞凭据，或仅在开发测试时显式将 `DEFAULT_EMBEDDING_PROVIDER` 设为 `mock`。
 
 ### 2. 安装依赖
 
@@ -165,12 +165,17 @@ Invoke-RestMethod "http://127.0.0.1:8002/api/v1/citations/graph?keyword=retrieva
 | 变量 | 用途 |
 | --- | --- |
 | `DEEPSEEK_API_KEY` | DeepSeek chat model key |
-| `OPENAI_API_KEY` | OpenAI embedding key |
+| `OPENAI_API_KEY` | 可选 OpenAI chat provider key；不用于 embedding |
 | `SQLITE_URL` | 本地 SQLite 数据库路径，默认 `data/app.db` |
 | `CHROMA_DIR` | Chroma 本地目录，默认 `data/chroma` |
 | `DEFAULT_CHAT_PROVIDER` | 默认聊天模型 provider |
 | `DEFAULT_CHAT_MODEL` | 默认聊天模型 |
-| `DEFAULT_EMBEDDING_PROVIDER` | 默认 embedding provider |
+| `DEFAULT_EMBEDDING_PROVIDER` | 默认 embedding provider，正式配置为 `xfyun-spark` |
+| `DEFAULT_EMBEDDING_MODEL` | 查询使用 `query`；论文入库时自动切换为 `para` |
+| `XFYUN_SPARK_APP_ID` | 讯飞 Spark Embedding app ID |
+| `XFYUN_SPARK_API_KEY` | 讯飞 Spark Embedding API key |
+| `XFYUN_SPARK_API_SECRET` | 讯飞 Spark Embedding API secret |
+| `XFYUN_SPARK_EMBEDDING_URL` | 讯飞 Spark Embedding 服务地址 |
 | `LOCAL_BGE_M3_BASE_URL` | 本地 BGE-M3 embedding 服务地址 |
 | `ENABLE_OPENALEX` | 是否启用 OpenAlex 引用扩展 |
 | `OPENALEX_API_KEY` | OpenAlex API key |
@@ -228,7 +233,7 @@ docs/
 
 - 这是本地 MVP，不是生产部署。
 - 多数外部模型和文献服务都有 deterministic fallback，方便无 key 开发。
-- 真实 DeepSeek、OpenAI、OpenAlex 行为仍需要 API key 和集成测试。
+- 真实 DeepSeek、讯飞 Spark Embedding、OpenAlex 行为仍需要对应凭据和集成测试；OpenAI 仅作为可选聊天 provider。
 - RAG ranking 仍偏简单，适合开发验证，不适合作为最终学术质量判断。
 - Chroma 是可选依赖；不可用时查询会降级到 SQLite 词法检索。不要手工删除 legacy collection，应使用迁移命令检查和重建索引。
 - 复现实验室只生成辅助报告和模板，不执行代码，不承诺复现论文指标。

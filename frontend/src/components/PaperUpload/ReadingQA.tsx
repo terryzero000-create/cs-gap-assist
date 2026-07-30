@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Dispatch, FormEvent, ReactNode, SetStateAction } from 'react';
 
 import type { ReadingQAHistoryItem, ReadingQAResponse } from '../../types';
+import { EvidenceStatusBadge } from '../EvidenceStatusBadge';
 
 interface ReadingQAProps {
   error: string | null;
@@ -54,11 +55,17 @@ function formatWarning(warning: string): string {
   if (warning.includes('Local bge-m3 embedding request failed')) {
     return '本地 bge-m3 暂不可用。请启动 Ollama 并运行 `ollama pull bge-m3`，以启用本地语义检索。';
   }
-  if (warning.includes('mock embeddings') || warning.includes('mock vectors') || warning.includes('OPENAI_API_KEY missing')) {
+  if (warning.includes('mock embeddings') || warning.includes('mock vectors')) {
     return '当前使用本地测试向量，检索效果仅供开发验证。';
   }
-  if (warning.includes('mock chat') || warning.includes('DEEPSEEK_API_KEY missing')) {
-    return '当前使用本地测试回答，配置 DeepSeek 后可启用真实模型输出。';
+  if (warning.includes('OPENAI_API_KEY missing')) {
+    return '当前选择的 OpenAI 对话模型不可用；请配置相应密钥或切换到 DeepSeek。';
+  }
+  if (warning.includes('DEEPSEEK_API_KEY missing')) {
+    return 'DeepSeek 当前不可用；系统只展示真实来源片段，不会生成研究结论。';
+  }
+  if (warning.includes('Synthetic mock chat')) {
+    return '当前回答来自显式开发测试模型，不会作为可信结果持久化。';
   }
   return warning;
 }
@@ -134,6 +141,7 @@ export function ReadingQA({
         {result ? (
           <>
             {actionMessage ? <p className="action-message">{actionMessage}</p> : null}
+            <EvidenceStatusBadge status={result.evidence_status} />
             <p className="answer-text">{renderAnswerWithCitationLinks(result.answer, result.sources.length)}</p>
             {Array.from(new Set(result.warnings.map(formatWarning).filter(Boolean))).map((warning) => (
               <p className="warning" key={warning}>{warning}</p>

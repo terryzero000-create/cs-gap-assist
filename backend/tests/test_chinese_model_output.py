@@ -32,14 +32,22 @@ def test_gap_prompt_requires_chinese_structured_values(monkeypatch, tmp_path) ->
     class CapturingProvider:
         async def generate(self, prompt: str, model: str | None = None) -> tuple[str, list[str]]:
             captured_prompts.append(prompt)
-            return '{"gaps":[{"title":"证据覆盖不足","value_level":"mid","description":"现有研究缺少长期评估。","evidence_papers":["paper-1"]}]}', []
+            return '{"gaps":[{"title":"证据覆盖不足","value_level":"mid","description":"现有研究缺少长期评估。","evidence_papers":["arxiv-2501.00001"]}]}', []
 
     class StubArxivSearchClient:
         def __init__(self, *args, **kwargs) -> None:
             pass
 
         async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
-            return [ExternalPaper(paper_id="paper-1", title="RAG Robustness", abstract="Evidence.", year=2025)], []
+            return [
+                ExternalPaper(
+                    paper_id="arxiv-2501.00001",
+                    title="RAG Robustness",
+                    abstract="Evidence.",
+                    year=2025,
+                    canonical_url="https://arxiv.org/abs/2501.00001",
+                )
+            ], []
 
     monkeypatch.setattr(gap_chain, "get_chat_provider", lambda settings, provider=None: CapturingProvider())
     monkeypatch.setattr(gap_chain, "ArxivSearchClient", StubArxivSearchClient)
@@ -75,7 +83,13 @@ def test_experiment_prompt_requires_chinese_structured_values(monkeypatch, tmp_p
 
         async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
             return [
-                ExternalPaper(paper_id=f"paper-{index}", title=f"Paper {index}", abstract="Evidence.", year=2025)
+                ExternalPaper(
+                    paper_id=f"arxiv-2501.{index:05d}",
+                    title=f"Paper {index}",
+                    abstract="Evidence.",
+                    year=2025,
+                    canonical_url=f"https://arxiv.org/abs/2501.{index:05d}",
+                )
                 for index in range(1, limit + 1)
             ], []
 

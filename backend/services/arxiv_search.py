@@ -1,3 +1,5 @@
+import asyncio
+import time
 from xml.etree import ElementTree
 
 import httpx
@@ -5,8 +7,12 @@ import httpx
 from backend.services.external_paper import ExternalPaper
 
 
+_CACHE: dict[str, tuple[float, list[ExternalPaper]]] = {}
+_LAST_LIVE_REQUEST_AT = 0.0
+
+
 class ArxivSearchClient:
-    """arXiv search client with deterministic fallback."""
+    """Rate-limited arXiv search client that never manufactures papers."""
 
     def __init__(
         self,
@@ -14,36 +20,80 @@ class ArxivSearchClient:
         transport: httpx.AsyncBaseTransport | None = None,
         timeout_seconds: float = 3.0,
         enabled: bool = True,
+        user_agent: str = "CS-Gap-Assist/0.1 (literature-research-client)",
+        min_interval_seconds: float = 3.0,
+        cache_ttl_seconds: float = 300.0,
     ) -> None:
         """Create an arXiv search client."""
         self.base_url = base_url
         self.transport = transport
         self.timeout_seconds = timeout_seconds
         self.enabled = enabled
+        self.user_agent = user_agent
+        self.min_interval_seconds = max(0.0, min_interval_seconds)
+        self.cache_ttl_seconds = max(0.0, cache_ttl_seconds)
 
     async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
         """Search arXiv papers related to a query."""
         if not query.strip():
             return [], ["arXiv query is empty; no external papers searched."]
         if not self.enabled:
-            return self._fallback(query, limit), ["External network is disabled; using deterministic arXiv fallback."]
+            return [], ["External network is disabled; arXiv evidence is unavailable."]
+        safe_limit = max(1, min(limit, 25))
+        cache_key = f"{self.base_url}|{query.strip().casefold()}|{safe_limit}"
+        cached = _CACHE.get(cache_key)
+        if self.transport is None and cached and time.monotonic() - cached[0] <= self.cache_ttl_seconds:
+            return cached[1], []
         params = {
             "search_query": f"all:{query}",
             "start": "0",
-            "max_results": str(limit),
+            "max_results": str(safe_limit),
             "sortBy": "relevance",
             "sortOrder": "descending",
         }
         try:
-            async with httpx.AsyncClient(transport=self.transport, timeout=self.timeout_seconds) as client:
-                response = await client.get(self.base_url, params=params)
-                response.raise_for_status()
+            await self._respect_rate_limit()
+            async with httpx.AsyncClient(
+                transport=self.transport,
+                timeout=self.timeout_seconds,
+                headers={"User-Agent": self.user_agent},
+            ) as client:
+                response = await self._get_with_retry(client, params)
             papers = self._parse_atom(response.text)
             if papers:
-                return papers[:limit], []
-            return self._fallback(query, limit), ["arXiv returned no results; using deterministic fallback."]
+                selected = papers[:safe_limit]
+                if self.transport is None:
+                    _CACHE[cache_key] = (time.monotonic(), selected)
+                return selected, []
+            return [], ["arXiv returned no results."]
         except Exception as exc:
-            return self._fallback(query, limit), [f"arXiv request failed ({exc}); using deterministic fallback."]
+            return [], [f"arXiv request failed: {exc}"]
+
+    async def _respect_rate_limit(self) -> None:
+        """Throttle live arXiv calls while keeping injected test transports immediate."""
+        global _LAST_LIVE_REQUEST_AT
+        if self.transport is not None or self.min_interval_seconds <= 0:
+            return
+        delay = self.min_interval_seconds - (time.monotonic() - _LAST_LIVE_REQUEST_AT)
+        if delay > 0:
+            await asyncio.sleep(delay)
+        _LAST_LIVE_REQUEST_AT = time.monotonic()
+
+    async def _get_with_retry(self, client: httpx.AsyncClient, params: dict[str, str]) -> httpx.Response:
+        """Retry rate-limited requests twice without substituting local data."""
+        response: httpx.Response | None = None
+        for attempt in range(3):
+            response = await client.get(self.base_url, params=params)
+            if response.status_code != 429:
+                response.raise_for_status()
+                return response
+            if attempt < 2:
+                retry_after = response.headers.get("Retry-After")
+                delay = float(retry_after) if retry_after and retry_after.replace(".", "", 1).isdigit() else 2**attempt
+                await asyncio.sleep(min(max(delay, 0.0), 10.0))
+        assert response is not None
+        response.raise_for_status()
+        return response
 
     def _parse_atom(self, text: str) -> list[ExternalPaper]:
         """Parse arXiv Atom XML into common metadata."""
@@ -65,6 +115,7 @@ class ArxivSearchClient:
                     title=" ".join(title.split()),
                     abstract=" ".join((summary or "No abstract available.").split()),
                     year=year,
+                    canonical_url=raw_id.replace("http://", "https://", 1),
                 )
             )
         return papers
@@ -73,15 +124,3 @@ class ArxivSearchClient:
         """Return normalized text from an Atom entry."""
         value = entry.findtext(f"atom:{tag}", namespaces=ns)
         return value.strip() if value else ""
-
-    def _fallback(self, query: str, limit: int) -> list[ExternalPaper]:
-        """Return deterministic local papers when live search is unavailable."""
-        return [
-            ExternalPaper(
-                paper_id=f"arxiv-{index}",
-                title=f"arXiv study on {query} #{index}",
-                abstract="This mock arXiv result discusses recent methods and unresolved experimental coverage.",
-                year=2025,
-            )
-            for index in range(1, limit + 1)
-        ]

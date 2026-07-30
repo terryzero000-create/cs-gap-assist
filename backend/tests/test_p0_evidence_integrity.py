@@ -347,7 +347,7 @@ def test_cosine_index_schema_and_production_sources_have_no_fake_generators(tmp_
     ]
 
     assert metadata["hnsw:space"] == "cosine"
-    assert profile.schema_version == 3
+    assert profile.schema_version == 4
     assert all("fallback-support-paper-" not in path.read_text(encoding="utf-8") for path in production_paths)
     assert all("arXiv study on" not in path.read_text(encoding="utf-8") for path in production_paths)
     assert all("OpenAIEmbeddingProvider" not in path.read_text(encoding="utf-8") for path in production_paths)

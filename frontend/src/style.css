@@ -2576,6 +2576,36 @@ textarea {
   padding: 5px 10px;
 }
 
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 20% 15%, rgba(39, 111, 82, 0.16), transparent 32%),
+    #f3efe6;
+}
+
+.auth-card {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 16px;
+  padding: 36px;
+  border: 1px solid #d8d0c2;
+  border-radius: 20px;
+  background: #fffdf8;
+  box-shadow: 0 24px 70px rgba(46, 55, 48, 0.14);
+}
+
+.auth-card h1,
+.auth-card p {
+  margin: 0;
+}
+
+.auth-card input {
+  width: 100%;
+}
+
 .evidence-status-verified {
   background: #e7f4ec;
   border-color: #abd1b8;

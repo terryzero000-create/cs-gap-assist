@@ -1,0 +1,27 @@
+{
+  "version": "rag-v1",
+  "status": "pending_manual_corpus",
+  "retrieval": {
+    "vector_weight": 0.55,
+    "lexical_weight": 0.45,
+    "rrf_k": 60,
+    "mmr_lambda": 0.7,
+    "semantic_threshold": 0.35,
+    "lexical_threshold": 0.05,
+    "vector_top_k": 30,
+    "lexical_top_k": 30,
+    "rerank_top_k": 20,
+    "final_top_k": 8
+  },
+  "release_gates": {
+    "minimum_cases": 36,
+    "recall_at_5": 0.85,
+    "mrr_at_10": 0.75,
+    "ndcg_at_10": 0.8,
+    "no_answer_accuracy": 0.9,
+    "citation_precision": 0.95,
+    "claim_citation_coverage": 0.9,
+    "top_k_duplicate_ratio": 0.15
+  },
+  "last_evaluation": null
+}

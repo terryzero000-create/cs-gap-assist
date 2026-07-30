@@ -45,7 +45,7 @@ function Wait-Url {
 }
 
 function Ensure-BackendDeps {
-    $check = 'import importlib.util,sys; missing=[m for m in ["fastapi","uvicorn","pydantic_settings","requests","numpy","httpx"] if importlib.util.find_spec(m) is None]; print(",".join(missing)); sys.exit(1 if missing else 0)'
+    $check = 'import importlib.util,sys; missing=[m for m in ["fastapi","uvicorn","pydantic_settings","numpy","httpx","fitz"] if importlib.util.find_spec(m) is None]; print(",".join(missing)); sys.exit(1 if missing else 0)'
     $missing = (& py -3.11 -c $check) -join ""
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Installing backend dependencies: $missing"
@@ -54,6 +54,35 @@ function Ensure-BackendDeps {
             throw "Backend dependency install failed."
         }
     }
+}
+
+function Ensure-LocalApiKey {
+    $envPath = Join-Path $Root ".env"
+    if (-not (Test-Path -LiteralPath $envPath)) {
+        Copy-Item -LiteralPath (Join-Path $Root ".env.example") -Destination $envPath
+    }
+    $match = Select-String -LiteralPath $envPath -Pattern '^APP_API_KEY=(.+)$' |
+        Select-Object -First 1
+    $current = if ($match) { $match.Matches[0].Groups[1].Value.Trim() } else { "" }
+    if (-not $current -or $current -eq "replace-with-a-long-local-token") {
+        $bytes = New-Object byte[] 32
+        $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+        $rng.GetBytes($bytes)
+        $rng.Dispose()
+        $current = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+        $content = Get-Content -LiteralPath $envPath
+        if ($match) {
+            $content = $content | ForEach-Object {
+                if ($_ -match '^APP_API_KEY=') { "APP_API_KEY=$current" } else { $_ }
+            }
+            Set-Content -LiteralPath $envPath -Value $content -Encoding UTF8
+        } else {
+            Add-Content -LiteralPath $envPath -Value "`nAPP_API_KEY=$current" -Encoding UTF8
+        }
+        Write-Host "Generated a local APP_API_KEY in .env."
+    }
+    $env:APP_API_KEY = $current
+    return $current
 }
 
 function Ensure-FrontendDeps {
@@ -76,6 +105,7 @@ Set-Location $Root
 Write-Host "Preparing CS Gap Assist dev server..."
 Ensure-BackendDeps
 Ensure-FrontendDeps
+$localApiKey = Ensure-LocalApiKey
 
 Write-Host "Releasing ports $BackendPort and $FrontendPort..."
 Stop-Port -Port $BackendPort
@@ -84,20 +114,20 @@ Start-Sleep -Seconds 2
 
 Remove-Item -LiteralPath $BackendOut, $BackendErr, $FrontendOut, $FrontendErr -ErrorAction SilentlyContinue
 
-Write-Host "Starting backend on 0.0.0.0:$BackendPort..."
+Write-Host "Starting backend on 127.0.0.1:$BackendPort..."
 $backend = Start-Process `
     -FilePath "py" `
-    -ArgumentList @("-3.11", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "$BackendPort") `
+    -ArgumentList @("-3.11", "-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", "$BackendPort") `
     -WorkingDirectory $Root `
     -WindowStyle Hidden `
     -RedirectStandardOutput $BackendOut `
     -RedirectStandardError $BackendErr `
     -PassThru
 
-Write-Host "Starting frontend on 0.0.0.0:$FrontendPort..."
+Write-Host "Starting frontend on 127.0.0.1:$FrontendPort..."
 $frontend = Start-Process `
     -FilePath "npm.cmd" `
-    -ArgumentList @("run", "dev", "--", "--host", "0.0.0.0", "--port", "$FrontendPort") `
+    -ArgumentList @("run", "dev", "--", "--host", "127.0.0.1", "--port", "$FrontendPort") `
     -WorkingDirectory $FrontendDir `
     -WindowStyle Hidden `
     -RedirectStandardOutput $FrontendOut `
@@ -112,7 +142,7 @@ $frontend = Start-Process `
     url = "http://localhost:$FrontendPort/"
 } | ConvertTo-Json | Set-Content -LiteralPath $PidFile -Encoding UTF8
 
-$healthUrl = "http://127.0.0.1:$FrontendPort/api/v1/health"
+$healthUrl = "http://127.0.0.1:$FrontendPort/api/v1/health/live"
 if (-not (Wait-Url -Url $healthUrl -Seconds 90)) {
     Write-Host "Startup did not become healthy in time."
     Write-Host "Backend log:  $BackendErr"
@@ -124,6 +154,7 @@ $url = "http://localhost:$FrontendPort/"
 Write-Host "Ready: $url"
 Write-Host "Backend PID:  $($backend.Id)"
 Write-Host "Frontend PID: $($frontend.Id)"
+Write-Host "Local API Key (enter in the browser): $localApiKey"
 Write-Host "Logs:"
 Write-Host "  $BackendErr"
 Write-Host "  $BackendOut"

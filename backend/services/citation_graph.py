@@ -4,6 +4,7 @@ from typing import Protocol
 
 import httpx
 
+from backend.core.sanitize import safe_exception_message
 from backend.models.schemas import CitationGraphResponse, CitationLink, CitationNode
 
 
@@ -66,7 +67,9 @@ class OpenAlexCitationClient:
                 expanded = await self._attach_neighbors(client, papers[:limit])
                 return expanded, []
         except Exception as exc:
-            return [], [f"OpenAlex request failed: {exc}"]
+            return [], [
+                f"OpenAlex request failed: {safe_exception_message(exc)}"
+            ]
 
     async def _get_with_retry(self, client: httpx.AsyncClient, params: dict[str, str]) -> httpx.Response:
         """Honor Retry-After and retry rate-limited OpenAlex requests twice."""
@@ -92,9 +95,20 @@ class OpenAlexCitationClient:
         """Attach a small number of citation neighbors for the highest-ranked works."""
         expanded: list[ExternalCitationPaper] = []
         lookup = {paper.paper_id: paper for paper in papers}
-        for paper in papers:
-            references = [lookup[work_id] for work_id in paper.references[0:2] if work_id.paper_id in lookup]
-            citations = await self._fetch_citations(client, paper.paper_id, limit=2)
+        citation_tasks: list[asyncio.Task[list[ExternalCitationPaper]]] = []
+        async with asyncio.TaskGroup() as group:
+            for paper in papers:
+                citation_tasks.append(
+                    group.create_task(
+                        self._fetch_citations(client, paper.paper_id, limit=2)
+                    )
+                )
+        for paper, citation_task in zip(papers, citation_tasks, strict=True):
+            references = [
+                lookup[work_id.paper_id]
+                for work_id in paper.references[0:2]
+                if work_id.paper_id in lookup
+            ]
             expanded.append(
                 ExternalCitationPaper(
                     paper_id=paper.paper_id,
@@ -103,7 +117,7 @@ class OpenAlexCitationClient:
                     citation_count=paper.citation_count,
                     influential_citation_count=paper.influential_citation_count,
                     references=references,
-                    citations=citations,
+                    citations=citation_task.result(),
                 )
             )
         return expanded

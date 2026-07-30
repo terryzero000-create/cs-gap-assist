@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
@@ -16,6 +17,7 @@ from backend.models.schemas import (
     ResearchPlanAgentStep,
     ResearchPlanCard,
     ResearchPlanRoute,
+    EvidenceRef,
 )
 from backend.repositories.sqlite_store import SQLiteStore
 from backend.services.arxiv_search import ArxivSearchClient
@@ -36,7 +38,7 @@ class ResearchPlanState:
     gaps: list[GapItem] = field(default_factory=list)
     top_gaps: list[GapItem] = field(default_factory=list)
     experiment_suggestions: list[ExperimentPlan] = field(default_factory=list)
-    recommended_papers: list[str] = field(default_factory=list)
+    recommended_papers: list[EvidenceRef] = field(default_factory=list)
     agent_steps: list[ResearchPlanAgentStep] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     routes: list[ResearchPlanRoute] = field(default_factory=list)
@@ -169,12 +171,11 @@ class ResearchPlanAgentService:
         return f"Selected {len(state.top_gaps)} top gap(s), prioritizing high-value items."
 
     async def experiment_suggestion_tool(self, state: ResearchPlanState) -> str:
-        plans: list[ExperimentPlan] = []
-        for gap in state.top_gaps:
+        async def suggest_for_gap(gap: GapItem):
             topic = f"{gap.title}. {gap.description}"
             if state.request.experiment_result:
                 topic = f"{topic}\nCurrent experiment result: {state.request.experiment_result}"
-            response = await suggest_experiments(
+            return await suggest_experiments(
                 ExperimentSuggestRequest(
                     gap_id=gap.gap_id,
                     topic=topic,
@@ -183,6 +184,15 @@ class ResearchPlanAgentService:
                 ),
                 self.settings,
             )
+
+        tasks: list[asyncio.Task] = []
+        async with asyncio.TaskGroup() as group:
+            for gap in state.top_gaps:
+                tasks.append(group.create_task(suggest_for_gap(gap)))
+
+        plans: list[ExperimentPlan] = []
+        for task in tasks:
+            response = task.result()
             plans.extend(response.experiments[:1])
             state.evidence_status = self._stronger_status(state.evidence_status, response.evidence_status)
             state.warnings.extend(response.warnings)
@@ -200,11 +210,25 @@ class ResearchPlanAgentService:
             cache_ttl_seconds=self.settings.arxiv_cache_ttl_seconds,
         ).search(query, limit=5)
         state.warnings.extend(warnings)
-        state.recommended_papers = [f"{paper.paper_id}: {paper.title}" for paper in papers]
+        candidates = [
+            EvidenceRef(
+                id=paper.paper_id,
+                title=paper.title,
+                source="arxiv",
+                canonical_url=paper.canonical_url,
+            )
+            for paper in papers
+            if paper.paper_id.startswith("arxiv-") and "arxiv.org/abs/" in paper.canonical_url
+        ]
+        state.recommended_papers = self.store.trusted_evidence_refs(candidates)
         if not state.recommended_papers:
-            fallback = [paper for gap in state.top_gaps for paper in gap.evidence_papers]
-            fallback.extend(paper for plan in state.experiment_suggestions for paper in plan.support_papers)
-            state.recommended_papers = list(dict.fromkeys(fallback))[:5]
+            fallback = [ref for gap in state.top_gaps for ref in gap.evidence_refs]
+            fallback.extend(
+                ref
+                for plan in state.experiment_suggestions
+                for ref in plan.support_refs
+            )
+            state.recommended_papers = self.store.trusted_evidence_refs(fallback)[:5]
             if state.recommended_papers:
                 state.warnings.append("No new arXiv recommendations found; reused verified evidence and support papers.")
         return f"Recommended {len(state.recommended_papers)} follow-up paper(s)."
@@ -227,7 +251,10 @@ class ResearchPlanAgentService:
                     research_gap=gap.description,
                     entry_point=self._entry_point(gap),
                     experiment_suggestion=self._experiment_text(plan),
-                    recommended_papers=state.recommended_papers[:5] or gap.evidence_papers,
+                    recommended_papers=[
+                        f"{ref.id}: {ref.title}" for ref in state.recommended_papers[:5]
+                    ],
+                    recommended_refs=state.recommended_papers[:5],
                     risks=plan.risks if plan else ["证据不足，需要先补充基线实验。"],
                     next_action=self._next_action(plan),
                 )

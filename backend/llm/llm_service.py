@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from backend.core.config import Settings
+from backend.core.sanitize import safe_exception_message
 from backend.models.schemas import ModelOption
 
 
@@ -70,7 +71,7 @@ class MockChatProvider(ChatProvider):
             }
             return json.dumps(payload, ensure_ascii=False), ["Synthetic mock chat generation was explicitly selected."]
         if "READING_QA" in prompt:
-            return "根据已检索到的来源片段，可以给出一个有证据支撑的中文回答。[1]", ["Synthetic mock chat generation was explicitly selected."]
+            return "根据已检索到的来源片段，可以给出一个有证据支撑的中文回答。[S1]", ["Synthetic mock chat generation was explicitly selected."]
         return "这是一个基于检索片段生成的中文测试回答。", ["Synthetic mock chat generation was explicitly selected."]
 
 
@@ -109,7 +110,10 @@ class OpenAICompatibleChatProvider(ChatProvider):
             data = response.json()
             return data["choices"][0]["message"]["content"], []
         except Exception as exc:
-            raise ChatProviderUnavailable(f"{self.provider_name} request failed: {exc}") from exc
+            raise ChatProviderUnavailable(
+                f"{self.provider_name} request failed: "
+                f"{safe_exception_message(exc)}"
+            ) from exc
 
 
 class DeepSeekChatProvider(OpenAICompatibleChatProvider):
@@ -184,8 +188,12 @@ CHAT_MODEL_REGISTRY: tuple[ChatModelRegistration, ...] = (
         provider="mock",
         model="mock-chat",
         factory=_mock_factory,
-        available=lambda settings: True,
-        warning=lambda settings: None,
+        available=lambda settings: settings.synthetic_mode_enabled,
+        warning=lambda settings: (
+            None
+            if settings.synthetic_mode_enabled
+            else "Synthetic chat is disabled outside test or explicit development mode."
+        ),
     ),
 )
 
@@ -206,6 +214,10 @@ def list_chat_model_options(settings: Settings) -> list[ModelOption]:
 def get_chat_provider(settings: Settings, provider: str | None = None) -> ChatProvider:
     """Resolve a chat provider from runtime config."""
     selected = provider or settings.default_chat_provider
+    if selected == "mock" and not settings.synthetic_mode_enabled:
+        raise ChatProviderUnavailable(
+            "Synthetic chat is disabled; set ALLOW_SYNTHETIC_MODE=true only for explicit development use."
+        )
     for entry in CHAT_MODEL_REGISTRY:
         if entry.provider == selected:
             return entry.factory(settings)

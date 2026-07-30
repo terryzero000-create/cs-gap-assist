@@ -19,12 +19,8 @@ interface ReadingQAProps {
 }
 
 function renderAnswerWithCitationLinks(answer: string, sourceCount: number): ReactNode[] {
-  return answer.split(/(\[(\d+)\])/g).reduce<ReactNode[]>((parts, token, index, tokens) => {
-    const citationNumber = Number(token.match(/^\[(\d+)\]$/)?.[1]);
-    const isDuplicateCapture = index > 0 && tokens[index - 1] === `[${token}]`;
-    if (isDuplicateCapture) {
-      return parts;
-    }
+  return answer.split(/(\[S\d+\])/g).reduce<ReactNode[]>((parts, token, index) => {
+    const citationNumber = Number(token.match(/^\[S(\d+)\]$/)?.[1]);
     if (citationNumber >= 1 && citationNumber <= sourceCount) {
       parts.push(
         <a className="citation-link" href={`#source-${citationNumber}`} key={`${token}-${index}`}>
@@ -46,28 +42,6 @@ function formatAnswerMarkdown(question: string, result: ReadingQAResponse): stri
     .join('\n\n');
 
   return `# 简牍论文问答\n\n## 问题\n\n${question}\n\n## 回答\n\n${result.answer}\n\n## 来源片段\n\n${sources || '无来源片段'}\n`;
-}
-
-function formatWarning(warning: string): string {
-  if (warning.includes('Xfyun Spark embedding failed')) {
-    return '';
-  }
-  if (warning.includes('Local bge-m3 embedding request failed')) {
-    return '本地 bge-m3 暂不可用。请启动 Ollama 并运行 `ollama pull bge-m3`，以启用本地语义检索。';
-  }
-  if (warning.includes('mock embeddings') || warning.includes('mock vectors')) {
-    return '当前使用本地测试向量，检索效果仅供开发验证。';
-  }
-  if (warning.includes('OPENAI_API_KEY missing')) {
-    return '当前选择的 OpenAI 对话模型不可用；请配置相应密钥或切换到 DeepSeek。';
-  }
-  if (warning.includes('DEEPSEEK_API_KEY missing')) {
-    return 'DeepSeek 当前不可用；系统只展示真实来源片段，不会生成研究结论。';
-  }
-  if (warning.includes('Synthetic mock chat')) {
-    return '当前回答来自显式开发测试模型，不会作为可信结果持久化。';
-  }
-  return warning;
 }
 
 export function ReadingQA({
@@ -143,8 +117,10 @@ export function ReadingQA({
             {actionMessage ? <p className="action-message">{actionMessage}</p> : null}
             <EvidenceStatusBadge status={result.evidence_status} />
             <p className="answer-text">{renderAnswerWithCitationLinks(result.answer, result.sources.length)}</p>
-            {Array.from(new Set(result.warnings.map(formatWarning).filter(Boolean))).map((warning) => (
-              <p className="warning" key={warning}>{warning}</p>
+            {result.warnings.filter(Boolean).map((warning, index) => (
+              <p className="warning" key={`${result.warning_codes?.[index]}:${warning}`}>
+                <strong>{result.warning_codes?.[index] ?? 'UNCLASSIFIED_WARNING'}</strong> · {warning}
+              </p>
             ))}
             <h3>来源片段</h3>
             <ol className="source-list">

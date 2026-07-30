@@ -26,7 +26,7 @@ def test_reading_qa_returns_answer_with_sources() -> None:
     assert body["sources"][0]["score"] >= 0
 
 
-def test_reading_qa_answer_uses_numbered_source_citations() -> None:
+def test_reading_qa_answer_uses_whitelisted_source_citations() -> None:
     client = TestClient(app)
     upload = client.post(
         "/api/v1/papers/upload",
@@ -41,7 +41,7 @@ def test_reading_qa_answer_uses_numbered_source_citations() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert "[1]" in body["answer"]
+    assert "[S1]" in body["answer"]
     assert len(body["sources"]) == 1
     assert body["evidence_status"] == "synthetic"
 
@@ -58,7 +58,7 @@ def test_reading_qa_reports_insufficient_evidence_without_sources() -> None:
     body = response.json()
     assert body["sources"] == []
     assert "证据不足" in body["answer"]
-    assert "[1]" not in body["answer"]
+    assert "[S1]" not in body["answer"]
     assert body["evidence_status"] == "insufficient_evidence"
 
 

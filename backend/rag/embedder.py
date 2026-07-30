@@ -1,17 +1,58 @@
+import asyncio
+import base64
 import hashlib
+import hmac
+import json
 import math
+import random
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
+from time import mktime
 from typing import Any
+from urllib.parse import urlencode
+from wsgiref.handlers import format_date_time
 
 import httpx
 
 from backend.core.config import Settings
+from backend.core.sanitize import safe_exception_message
 from backend.models.schemas import ModelOption
+from backend.services.chunker import xfyun_request_payload_bytes
 
 
-VECTOR_INDEX_SCHEMA_VERSION = 3
+VECTOR_INDEX_SCHEMA_VERSION = 4
+_SHARED_HTTP_CLIENTS: dict[str, httpx.AsyncClient] = {}
+_SHARED_LIMITERS: dict[tuple[int, str, int], asyncio.Semaphore] = {}
+
+
+def _shared_http_client(key: str, timeout: httpx.Timeout) -> httpx.AsyncClient:
+    client = _SHARED_HTTP_CLIENTS.get(key)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(timeout=timeout)
+        _SHARED_HTTP_CLIENTS[key] = client
+    return client
+
+
+def _shared_limiter(key: str, concurrency: int) -> asyncio.Semaphore:
+    loop_key = (id(asyncio.get_running_loop()), key, concurrency)
+    limiter = _SHARED_LIMITERS.get(loop_key)
+    if limiter is None:
+        limiter = asyncio.Semaphore(concurrency)
+        _SHARED_LIMITERS[loop_key] = limiter
+    return limiter
+
+
+async def close_embedding_http_clients() -> None:
+    """Close process-shared provider clients during application shutdown."""
+    clients = list(_SHARED_HTTP_CLIENTS.values())
+    _SHARED_HTTP_CLIENTS.clear()
+    _SHARED_LIMITERS.clear()
+    await asyncio.gather(
+        *(client.aclose() for client in clients if not client.is_closed),
+        return_exceptions=True,
+    )
 
 
 def _normalized_vector(text: str, dimension: int) -> list[float]:
@@ -35,17 +76,41 @@ class EmbeddingProfile:
     model: str
     dimension: int
     schema_version: int = VECTOR_INDEX_SCHEMA_VERSION
+    metric: str = "cosine"
+    service_id: str = "unspecified"
+    protocol_version: str = "unspecified"
+    normalization: str = "provider"
+    domain_compatibility: str = "query-para"
+    chunker_schema: str = "chunker-v2"
 
     @property
     def key(self) -> str:
         """Return a stable profile key used by SQLite index bookkeeping."""
-        return f"v{self.schema_version}:{self.provider}:{self.model}:{self.dimension}"
+        return ":".join(
+            (
+                f"v{self.schema_version}",
+                self.provider,
+                self.model,
+                self.service_id,
+                self.protocol_version,
+                str(self.dimension),
+                self.metric,
+                self.normalization,
+                self.domain_compatibility,
+                self.chunker_schema,
+            )
+        )
 
     @property
     def collection_name(self) -> str:
         """Return a deterministic Chroma collection name."""
-        slug = re.sub(r"[^a-z0-9]+", "_", f"{self.provider}_{self.model}".lower()).strip("_")
-        return f"paper_chunks_v{self.schema_version}_{slug}_{self.dimension}"
+        slug = re.sub(
+            r"[^a-z0-9]+",
+            "_",
+            f"{self.provider}_{self.model}_{self.protocol_version}_{self.metric}".lower(),
+        ).strip("_")
+        fingerprint = hashlib.sha256(self.key.encode("utf-8")).hexdigest()[:12]
+        return f"paper_chunks_v{self.schema_version}_{slug}_{self.dimension}_{fingerprint}"
 
 
 @dataclass(frozen=True)
@@ -75,7 +140,14 @@ class MockEmbeddingProvider(EmbeddingProvider):
     """Deterministic local embedding provider used when external keys are missing."""
 
     def __init__(self, model: str = "mock-embedding") -> None:
-        self.profile = EmbeddingProfile(provider="mock", model=model, dimension=16)
+        self.profile = EmbeddingProfile(
+            provider="mock",
+            model=model,
+            dimension=16,
+            service_id="deterministic-test-only",
+            protocol_version="mock-v1",
+            normalization="l2",
+        )
 
     async def embed(self, texts: list[str]) -> EmbeddingResult:
         """Return stable hash-based vectors for local development."""
@@ -96,7 +168,14 @@ class LocalBgeM3EmbeddingProvider(EmbeddingProvider):
         self.base_url = settings.local_bge_m3_base_url.rstrip("/")
         self.model = model or settings.local_bge_m3_model
         self.transport = transport
-        self.profile = EmbeddingProfile(provider="local-bge-m3", model=self.model, dimension=1024)
+        self.profile = EmbeddingProfile(
+            provider="local-bge-m3",
+            model=self.model,
+            dimension=1024,
+            service_id="ollama-api-embed",
+            protocol_version="ollama-v1",
+            normalization="provider",
+        )
 
     async def embed(self, texts: list[str]) -> EmbeddingResult:
         """Embed texts with local bge-m3 or fall back to deterministic mock vectors."""
@@ -104,21 +183,44 @@ class LocalBgeM3EmbeddingProvider(EmbeddingProvider):
             return EmbeddingResult(vectors=[], warnings=[], profile=self.profile)
         payload: dict[str, Any] = {"model": self.model, "input": texts}
         try:
-            async with httpx.AsyncClient(timeout=60.0, transport=self.transport) as client:
+            if self.transport is None:
+                client = _shared_http_client(
+                    self.base_url,
+                    httpx.Timeout(60.0),
+                )
                 response = await client.post(f"{self.base_url}/api/embed", json=payload)
-                response.raise_for_status()
+            else:
+                async with httpx.AsyncClient(
+                    timeout=60.0,
+                    transport=self.transport,
+                ) as client:
+                    response = await client.post(
+                        f"{self.base_url}/api/embed",
+                        json=payload,
+                    )
+            response.raise_for_status()
             data = response.json()
             embeddings = data.get("embeddings")
             if not isinstance(embeddings, list) or len(embeddings) != len(texts):
                 raise ValueError("Ollama /api/embed response did not contain one embedding per input text.")
             vectors = [[float(value) for value in vector] for vector in embeddings]
             dimension = len(vectors[0]) if vectors else self.profile.dimension
-            profile = EmbeddingProfile(provider=self.profile.provider, model=self.profile.model, dimension=dimension)
+            profile = EmbeddingProfile(
+                provider=self.profile.provider,
+                model=self.profile.model,
+                dimension=dimension,
+                service_id=self.profile.service_id,
+                protocol_version=self.profile.protocol_version,
+                normalization=self.profile.normalization,
+            )
             return EmbeddingResult(vectors=vectors, warnings=[], profile=profile)
         except Exception as exc:
             return EmbeddingResult(
                 vectors=[_normalized_vector(text, self.profile.dimension) for text in texts],
-                warnings=[f"Local bge-m3 embedding request failed ({exc}); using lexical fallback."],
+                warnings=[
+                    "Local bge-m3 embedding request failed "
+                    f"({safe_exception_message(exc)}); using lexical fallback."
+                ],
                 profile=self.profile,
                 is_fallback=True,
             )
@@ -141,53 +243,83 @@ class XfyunSparkEmbeddingProvider(EmbeddingProvider):
         self,
         settings: Settings,
         model: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.settings = settings
         self.domain = model or settings.default_embedding_model or "query"
-        self.profile = EmbeddingProfile(provider="xfyun-spark", model="spark-embedding", dimension=2560)
+        self.transport = transport
+        self.profile = EmbeddingProfile(
+            provider="xfyun-spark",
+            model="spark-embedding",
+            dimension=2560,
+            service_id="xfyun-spark-embedding",
+            protocol_version="embedding-http-v1",
+            normalization="provider",
+            domain_compatibility="query-para",
+        )
 
     async def embed(self, texts: list[str]) -> EmbeddingResult:
         if not texts:
             return EmbeddingResult(vectors=[], warnings=[], profile=self.profile)
         if not self.settings.xfyun_spark_app_id or not self.settings.xfyun_spark_api_key or not self.settings.xfyun_spark_api_secret:
             return EmbeddingResult(
-                vectors=[self._vectorize_fallback(text) for text in texts],
+                vectors=[],
                 warnings=["XFYUN_SPARK credentials missing; using lexical fallback."],
                 profile=self.profile,
                 is_fallback=True,
             )
-
-        vectors: list[list[float]] = []
-        warnings: list[str] = []
-        used_fallback = False
-
-        for text in texts:
-            try:
-                vector = self._embed_single_sync(text)
-                vectors.append(vector)
-            except Exception as exc:
-                vectors.append(self._vectorize_fallback(text))
-                used_fallback = True
-                warnings.append(f"Xfyun Spark embedding failed ({exc}); using lexical fallback.")
-
-        return EmbeddingResult(vectors=vectors, warnings=warnings, profile=self.profile, is_fallback=used_fallback)
-
-    def _vectorize_fallback(self, text: str) -> list[float]:
-        """Return a deterministic 2560-dim vector compatible with Spark embeddings."""
-        return _normalized_vector(text, self.profile.dimension)
-
-    # ------------------------------------------------------------------
-    # All methods below mirror the official Embedding.py demo precisely
-    # ------------------------------------------------------------------
+        oversized = [
+            index
+            for index, text in enumerate(texts)
+            if self._payload_text_bytes(text) > self.settings.xfyun_max_text_bytes
+        ]
+        if oversized:
+            return EmbeddingResult(
+                vectors=[],
+                warnings=[
+                    f"Xfyun Spark input exceeded {self.settings.xfyun_max_text_bytes} bytes at indexes {oversized}."
+                ],
+                profile=self.profile,
+                is_fallback=True,
+            )
+        request_url = (
+            f"{self.settings.xfyun_spark_embedding_url.rstrip('/')}"
+            f"{self.settings.xfyun_spark_embedding_path}"
+        )
+        semaphore = _shared_limiter(
+            request_url,
+            self.settings.xfyun_embedding_concurrency,
+        )
+        timeout = httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0)
+        try:
+            if self.transport is None:
+                client = _shared_http_client(request_url, timeout)
+                vectors = await asyncio.gather(
+                    *(self._embed_single(client, semaphore, text) for text in texts)
+                )
+            else:
+                async with httpx.AsyncClient(
+                    transport=self.transport,
+                    timeout=timeout,
+                ) as client:
+                    vectors = await asyncio.gather(
+                        *(self._embed_single(client, semaphore, text) for text in texts)
+                    )
+            self._validate_vectors(vectors, len(texts))
+            return EmbeddingResult(vectors=vectors, warnings=[], profile=self.profile)
+        except Exception as exc:
+            return EmbeddingResult(
+                vectors=[],
+                warnings=[
+                    "Xfyun Spark embedding failed "
+                    f"({safe_exception_message(exc)}); lexical retrieval remains available."
+                ],
+                profile=self.profile,
+                is_fallback=True,
+            )
 
     def _build_auth_url(self, request_url: str, api_key: str, api_secret: str) -> str:
         """Build signed URL using the same algorithm as the Spark demo."""
-        from datetime import datetime
-        from time import mktime
-        from wsgiref.handlers import format_date_time
-        import hashlib, hmac, base64
-        from urllib.parse import urlencode
-
         # Parse host + path from request_url
         stidx = request_url.index("://")
         host = request_url[stidx + 3:]
@@ -217,10 +349,10 @@ class XfyunSparkEmbeddingProvider(EmbeddingProvider):
 
     def _build_body(self, text: str) -> dict:
         """Build request body matching the demo's get_Body()."""
-        import json, base64 as b64mod
-
         text_obj = {"messages": [{"content": text, "role": "user"}]}
-        text_b64 = b64mod.b64encode(json.dumps(text_obj).encode("utf-8")).decode()
+        text_b64 = base64.b64encode(
+            json.dumps(text_obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).decode()
 
         return {
             "header": {
@@ -249,33 +381,73 @@ class XfyunSparkEmbeddingProvider(EmbeddingProvider):
             },
         }
 
-    def _embed_single_sync(self, text: str) -> list[float]:
-        """Sync call matching the demo. Uses requests library like the demo."""
-        import requests as req_lib
-        import json, base64 as b64mod
+    async def _embed_single(
+        self,
+        client: httpx.AsyncClient,
+        semaphore: asyncio.Semaphore,
+        text: str,
+    ) -> list[float]:
+        """Call one protocol-compatible endpoint with bounded retries."""
+        request_url = f"{self.settings.xfyun_spark_embedding_url.rstrip('/')}{self.settings.xfyun_spark_embedding_path}"
+        async with semaphore:
+            for attempt in range(3):
+                url = self._build_auth_url(
+                    request_url,
+                    api_key=self.settings.xfyun_spark_api_key or "",
+                    api_secret=self.settings.xfyun_spark_api_secret or "",
+                )
+                try:
+                    response = await client.post(
+                        url,
+                        json=self._build_body(text),
+                        headers={"content-type": "application/json"},
+                    )
+                    if response.status_code == 429 or response.status_code >= 500:
+                        if attempt < 2:
+                            await asyncio.sleep((0.5 * (2**attempt)) + random.uniform(0.0, 0.1))
+                            continue
+                    response.raise_for_status()
+                    data = response.json()
+                    code = data["header"]["code"]
+                    if code != 0:
+                        raise RuntimeError(
+                            f"Xfyun Spark API error (code={code}): "
+                            f"{data['header'].get('message', 'unknown')}"
+                        )
+                    return self._decode_vector(data["payload"]["feature"]["text"])
+                except (httpx.TimeoutException, httpx.NetworkError):
+                    if attempt >= 2:
+                        raise
+                    await asyncio.sleep((0.5 * (2**attempt)) + random.uniform(0.0, 0.1))
+        raise RuntimeError("Xfyun Spark embedding retry loop exhausted.")
+
+    @staticmethod
+    def _decode_vector(text_base: str) -> list[float]:
         import numpy as np
 
-        request_url = f"{self.settings.xfyun_spark_embedding_url.rstrip('/')}{self.settings.xfyun_spark_embedding_path}"
-        url = self._build_auth_url(
-            request_url,
-            api_key=self.settings.xfyun_spark_api_key or "",
-            api_secret=self.settings.xfyun_spark_api_secret or "",
-        )
-        body = self._build_body(text)
-        resp_text = req_lib.post(url, json=body, headers={"content-type": "application/json"}).text
-
-        data = json.loads(resp_text)
-        code = data["header"]["code"]
-        if code != 0:
-            raise RuntimeError(
-                f"Xfyun Spark API error (code={code}): {data['header'].get('message', 'unknown')}"
-            )
-
-        text_base = data["payload"]["feature"]["text"]
-        raw_bytes = b64mod.b64decode(text_base)
+        raw_bytes = base64.b64decode(text_base)
         dt = np.dtype(np.float32).newbyteorder("<")
-        vector = np.frombuffer(raw_bytes, dtype=dt).tolist()
-        return vector
+        return np.frombuffer(raw_bytes, dtype=dt).tolist()
+
+    def _payload_text_bytes(self, text: str) -> int:
+        return xfyun_request_payload_bytes(
+            text,
+            app_id=self.settings.xfyun_spark_app_id or "",
+            domain=self.domain,
+        )
+
+    def _validate_vectors(self, vectors: list[list[float]], expected_count: int) -> None:
+        if len(vectors) != expected_count:
+            raise ValueError(
+                f"Xfyun Spark returned {len(vectors)} vectors for {expected_count} texts."
+            )
+        for vector in vectors:
+            if len(vector) != self.profile.dimension:
+                raise ValueError(
+                    f"Xfyun Spark returned {len(vector)} dimensions; expected {self.profile.dimension}."
+                )
+            if not all(math.isfinite(float(value)) for value in vector):
+                raise ValueError("Xfyun Spark returned NaN or Inf values.")
 
 
 @dataclass(frozen=True)
@@ -348,6 +520,10 @@ def list_embedding_model_options(settings: Settings) -> list[ModelOption]:
 def get_embedding_provider(settings: Settings, provider: str | None = None, model: str | None = None) -> EmbeddingProvider:
     """Resolve an embedding provider from runtime config."""
     selected = provider or settings.default_embedding_provider
+    if selected == "mock" and not settings.synthetic_mode_enabled:
+        raise ValueError(
+            "Synthetic embeddings are disabled; set ALLOW_SYNTHETIC_MODE=true only for explicit development use."
+        )
     for entry in EMBEDDING_MODEL_REGISTRY:
         if entry.provider == selected:
             return entry.factory(settings, model)

@@ -166,7 +166,7 @@ def test_migration_is_dry_by_default_and_idempotent(tmp_path) -> None:
     )
     assert dry_run["pending_count"] == 1
     assert target_before.collection is None
-    assert manager.status()["state"] == "legacy"
+    assert manager.status()["state"] == "migration_required"
 
     assert sqlite.acquire_vector_index_lock("999999:interrupted") is True
     assert manager.status()["state"] == "migrating"

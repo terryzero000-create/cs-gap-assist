@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 ValueLevel = Literal["high", "mid"]
@@ -10,12 +10,63 @@ ReproductionMode = Literal["standard", "focused", "template"]
 EvidenceStatus = Literal["verified", "local_only", "insufficient_evidence", "provider_unavailable", "synthetic"]
 EvidenceSource = Literal["local", "arxiv", "openalex"]
 TrustStatus = Literal["verified", "local_only", "synthetic", "legacy_unverified"]
+UploadStatus = Literal[
+    "received",
+    "validating",
+    "parsed",
+    "chunked",
+    "embedding",
+    "indexed",
+    "ready",
+    "failed",
+]
 
 
 class WarningMixin(BaseModel):
     """Common response fields for recoverable system warnings."""
 
     warnings: list[str] = Field(default_factory=list)
+    warning_codes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def populate_warning_codes(self) -> "WarningMixin":
+        """Keep one stable machine-readable code parallel to every warning."""
+        if len(self.warning_codes) < len(self.warnings):
+            generated = [
+                _warning_code(warning)
+                for warning in self.warnings[len(self.warning_codes) :]
+            ]
+            self.warning_codes = [*self.warning_codes, *generated]
+        return self
+
+
+def _warning_code(warning: str) -> str:
+    normalized = warning.casefold()
+    patterns = (
+        ("429", "EXTERNAL_RATE_LIMITED"),
+        ("rate limit", "EXTERNAL_RATE_LIMITED"),
+        ("external network is disabled", "EXTERNAL_NETWORK_DISABLED"),
+        ("openalex citation expansion is disabled", "OPENALEX_DISABLED"),
+        ("openalex_api_key missing", "OPENALEX_CREDENTIALS_MISSING"),
+        ("returned no result", "EXTERNAL_EMPTY_RESULT"),
+        ("returned no works", "EXTERNAL_EMPTY_RESULT"),
+        ("no new arxiv", "EXTERNAL_EMPTY_RESULT"),
+        ("arxiv request failed", "ARXIV_SEARCH_FAILED"),
+        ("openalex request failed", "OPENALEX_SEARCH_FAILED"),
+        ("semantic retrieval was unavailable", "SEMANTIC_RETRIEVAL_UNAVAILABLE"),
+        ("lexical fallback", "LEXICAL_FALLBACK_USED"),
+        ("fts5 returned no match", "LEXICAL_FALLBACK_USED"),
+        ("cross-encoder", "RERANKER_UNAVAILABLE"),
+        ("prompt injection", "SOURCE_PROMPT_INJECTION_FLAGGED"),
+        ("instruction-like", "SOURCE_PROMPT_INJECTION_FLAGGED"),
+        ("provider unavailable", "MODEL_PROVIDER_UNAVAILABLE"),
+        ("synthetic", "SYNTHETIC_MODE"),
+        ("mock", "SYNTHETIC_MODE"),
+    )
+    for needle, code in patterns:
+        if needle in normalized:
+            return code
+    return "UNCLASSIFIED_WARNING"
 
 
 class EvidenceResponseMixin(WarningMixin):
@@ -28,11 +79,11 @@ class EvidenceRef(BaseModel):
     """Canonical reference to evidence admitted by a trusted retrieval source."""
 
     source: EvidenceSource
-    id: str
-    title: str
-    canonical_url: str
-    doc_id: str | None = None
-    chunk_id: str | None = None
+    id: str = Field(max_length=512)
+    title: str = Field(max_length=1000)
+    canonical_url: str = Field(max_length=4096)
+    doc_id: str | None = Field(default=None, max_length=128)
+    chunk_id: str | None = Field(default=None, max_length=128)
     page: int | None = None
 
 
@@ -48,10 +99,25 @@ class ModelOption(BaseModel):
 class ModelConfig(BaseModel):
     """Runtime model selection for a single request."""
 
-    chat_provider: str | None = None
-    chat_model: str | None = None
-    embedding_provider: str | None = None
-    embedding_model: str | None = None
+    chat_provider: str | None = Field(default=None, max_length=64)
+    chat_model: str | None = Field(default=None, max_length=128)
+    embedding_provider: str | None = Field(default=None, max_length=64)
+    embedding_model: str | None = Field(default=None, max_length=128)
+
+
+class RuntimeModelRequest(BaseModel):
+    """Accept the public model_config key without conflicting with Pydantic internals."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    runtime_model_config: ModelConfig | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_public_model_config(cls, value: object) -> object:
+        """Map the wire-level model_config key to the internal field name."""
+        if isinstance(value, dict) and "model_config" in value and "runtime_model_config" not in value:
+            return {**value, "runtime_model_config": value["model_config"]}
+        return value
 
 
 class ModelConfigResponse(BaseModel):
@@ -71,6 +137,7 @@ class EmbeddingProfileStatus(BaseModel):
     model: str
     dimension: int
     schema_version: int
+    chunker_schema: str
     key: str
 
 
@@ -92,11 +159,21 @@ class VectorIndexStatusResponse(WarningMixin):
 class PaperChunk(BaseModel):
     """A searchable chunk extracted from a PDF."""
 
-    chunk_id: str
-    doc_id: str
-    page: int
-    text: str
+    chunk_id: str = Field(max_length=128)
+    doc_id: str = Field(max_length=128)
+    page: int = Field(ge=1)
+    text: str = Field(max_length=100_000)
     score: float | None = None
+    revision_id: str | None = Field(default=None, max_length=128)
+    ordinal: int = Field(default=0, ge=0)
+    page_end: int | None = Field(default=None, ge=1)
+    section_path: str = Field(default="", max_length=1000)
+    char_start: int = Field(default=0, ge=0)
+    char_end: int = Field(default=0, ge=0)
+    block_type: Literal["text", "heading", "table", "formula", "code", "ocr"] = "text"
+    chunker_version: str = Field(default="legacy", max_length=64)
+    content_hash: str = Field(default="", max_length=128)
+    injection_flagged: bool = False
 
 
 class PaperUploadResponse(WarningMixin):
@@ -115,6 +192,9 @@ class PaperRecord(BaseModel):
     created_at: str
     is_favorite: bool = False
     tags: list[str] = Field(default_factory=list)
+    active_revision_id: str | None = None
+    ingestion_status: str = "ready"
+    reupload_required: bool = False
 
 
 class PaperListResponse(BaseModel):
@@ -123,22 +203,44 @@ class PaperListResponse(BaseModel):
     papers: list[PaperRecord]
 
 
+class PaperUploadTaskResponse(WarningMixin):
+    """State returned by asynchronous paper ingestion endpoints."""
+
+    upload_id: str
+    doc_id: str
+    revision_id: str
+    title: str
+    status: UploadStatus
+    status_url: str
+    retryable: bool = False
+    error_code: str | None = None
+    error: str | None = None
+    page_count: int | None = None
+    chunk_count: int = 0
+
+
 class PaperCollectionUpdateRequest(BaseModel):
     """Request to update personal collection metadata for a paper."""
 
-    tags: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list, max_length=20)
     is_favorite: bool = False
 
+    @field_validator("tags")
+    @classmethod
+    def validate_tags(cls, value: list[str]) -> list[str]:
+        """Normalize and bound collection tags."""
+        normalized = list(dict.fromkeys(tag.strip() for tag in value if tag.strip()))
+        if any(len(tag) > 50 for tag in normalized):
+            raise ValueError("Each tag must be at most 50 characters.")
+        return normalized
 
-class ReadingQARequest(BaseModel):
+
+class ReadingQARequest(RuntimeModelRequest):
     """Question request over uploaded papers."""
 
-    model_config = ConfigDict(populate_by_name=True)
-
-    question: str = Field(min_length=1)
-    doc_ids: list[str] = Field(min_length=1)
+    question: str = Field(min_length=1, max_length=4000)
+    doc_ids: list[str] = Field(min_length=1, max_length=50)
     top_k: int = Field(default=5, ge=1, le=10)
-    runtime_model_config: ModelConfig | None = Field(default=None, alias="model_config")
 
     @field_validator("question")
     @classmethod
@@ -171,23 +273,20 @@ class GapItem(BaseModel):
     """Research gap item following the public API contract."""
 
     gap_id: str = Field(default_factory=lambda: str(uuid4()))
-    title: str
+    title: str = Field(max_length=1000)
     value_level: ValueLevel
-    description: str
-    evidence_papers: list[str]
+    description: str = Field(max_length=20_000)
+    evidence_papers: list[str] = Field(max_length=50)
     evidence_refs: list[EvidenceRef] = Field(default_factory=list)
     trust_status: TrustStatus = "legacy_unverified"
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
-class GapAnalysisRequest(BaseModel):
+class GapAnalysisRequest(RuntimeModelRequest):
     """Request for research gap analysis."""
 
-    model_config = ConfigDict(populate_by_name=True)
-
-    topic: str
-    doc_ids: list[str]
-    runtime_model_config: ModelConfig | None = Field(default=None, alias="model_config")
+    topic: str = Field(min_length=1, max_length=500)
+    doc_ids: list[str] = Field(max_length=50)
 
 
 class GapAnalysisResponse(EvidenceResponseMixin):
@@ -196,15 +295,12 @@ class GapAnalysisResponse(EvidenceResponseMixin):
     gaps: list[GapItem]
 
 
-class ExperimentSuggestRequest(BaseModel):
+class ExperimentSuggestRequest(RuntimeModelRequest):
     """Request for literature-supported experiment suggestions."""
 
-    model_config = ConfigDict(populate_by_name=True)
-
-    gap_id: str
-    topic: str | None = None
-    evidence_refs: list[EvidenceRef] = Field(default_factory=list)
-    runtime_model_config: ModelConfig | None = Field(default=None, alias="model_config")
+    gap_id: str = Field(min_length=1, max_length=128)
+    topic: str | None = Field(default=None, max_length=500)
+    evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=50)
 
 
 class ExperimentPlan(BaseModel):
@@ -229,15 +325,12 @@ class ExperimentSuggestResponse(EvidenceResponseMixin):
     experiments: list[ExperimentPlan]
 
 
-class ReproductionAgentRequest(BaseModel):
+class ReproductionAgentRequest(RuntimeModelRequest):
     """Request for the reproduction lab agent."""
 
-    model_config = ConfigDict(populate_by_name=True)
-
-    paper_id: str
+    paper_id: str = Field(min_length=1, max_length=128)
     mode: ReproductionMode = "standard"
-    user_requirement: str
-    runtime_model_config: ModelConfig | None = Field(default=None, alias="model_config")
+    user_requirement: str = Field(min_length=1, max_length=4000)
 
 
 class ToolObservation(BaseModel):
@@ -287,15 +380,12 @@ class ReproductionAgentResponse(WarningMixin):
     report: ReproductionReport
 
 
-class ResearchPlanAgentRequest(BaseModel):
+class ResearchPlanAgentRequest(RuntimeModelRequest):
     """Request for the research planning agent."""
 
-    model_config = ConfigDict(populate_by_name=True)
-
-    research_direction: str = Field(min_length=1)
-    selected_paper_ids: list[str] = Field(min_length=1)
-    experiment_result: str | None = None
-    runtime_model_config: ModelConfig | None = Field(default=None, alias="model_config")
+    research_direction: str = Field(min_length=1, max_length=500)
+    selected_paper_ids: list[str] = Field(min_length=1, max_length=50)
+    experiment_result: str | None = Field(default=None, max_length=4000)
 
 
 class ResearchPlanAgentStep(BaseModel):
@@ -317,6 +407,7 @@ class ResearchPlanCard(BaseModel):
     entry_point: str
     experiment_suggestion: str
     recommended_papers: list[str]
+    recommended_refs: list[EvidenceRef] = Field(default_factory=list)
     risks: list[str]
     next_action: str
 
@@ -364,11 +455,20 @@ class CitationGraphResponse(EvidenceResponseMixin):
 class NoteCreateRequest(BaseModel):
     """Request to create a knowledge-base note."""
 
-    title: str
-    content: str
-    tags: list[str] = Field(default_factory=list)
-    related_doc_id: str | None = None
-    related_gap_id: str | None = None
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1, max_length=100_000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    related_doc_id: str | None = Field(default=None, max_length=128)
+    related_gap_id: str | None = Field(default=None, max_length=128)
+
+    @field_validator("tags")
+    @classmethod
+    def validate_note_tags(cls, value: list[str]) -> list[str]:
+        """Normalize and bound note tags."""
+        normalized = list(dict.fromkeys(tag.strip() for tag in value if tag.strip()))
+        if any(len(tag) > 50 for tag in normalized):
+            raise ValueError("Each tag must be at most 50 characters.")
+        return normalized
 
 
 class NoteRecord(NoteCreateRequest):

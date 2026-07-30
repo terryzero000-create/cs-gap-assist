@@ -1,6 +1,9 @@
 export interface ApiErrorPayload {
   error: string;
   code: number;
+  error_code: string;
+  retryable: boolean;
+  details: Record<string, unknown>;
 }
 
 export interface ModelConfig {
@@ -28,6 +31,26 @@ export interface PaperUploadResponse {
   title: string;
   chunk_count: number;
   warnings: string[];
+  warning_codes: string[];
+  reupload_required?: boolean;
+}
+
+export type UploadStatus = 'received' | 'validating' | 'parsed' | 'chunked' | 'embedding' | 'indexed' | 'ready' | 'failed';
+
+export interface PaperUploadTaskResponse {
+  upload_id: string;
+  doc_id: string;
+  revision_id: string;
+  title: string;
+  status: UploadStatus;
+  status_url: string;
+  retryable: boolean;
+  error_code: string | null;
+  error: string | null;
+  page_count: number | null;
+  chunk_count: number;
+  warnings: string[];
+  warning_codes: string[];
 }
 
 export interface PaperRecord {
@@ -36,6 +59,9 @@ export interface PaperRecord {
   created_at: string;
   is_favorite: boolean;
   tags: string[];
+  active_revision_id?: string | null;
+  ingestion_status?: string;
+  reupload_required?: boolean;
 }
 
 export interface PaperListResponse {
@@ -68,6 +94,7 @@ export interface ReadingQAResponse {
   sources: SourceParagraph[];
   evidence_status: EvidenceStatus;
   warnings: string[];
+  warning_codes: string[];
 }
 
 export interface ReadingQAHistoryItem {
@@ -93,6 +120,7 @@ export interface GapAnalysisResponse {
   gaps: GapItem[];
   evidence_status: EvidenceStatus;
   warnings: string[];
+  warning_codes: string[];
 }
 
 export interface ExperimentPlan {
@@ -113,6 +141,7 @@ export interface ExperimentSuggestResponse {
   experiments: ExperimentPlan[];
   evidence_status: EvidenceStatus;
   warnings: string[];
+  warning_codes: string[];
 }
 
 export type ReproductionMode = 'standard' | 'focused' | 'template';
@@ -162,6 +191,7 @@ export interface ReproductionAgentResponse {
   agent_steps: ReproductionAgentStep[];
   report: ReproductionReport;
   warnings: string[];
+  warning_codes: string[];
 }
 
 export interface ResearchPlanAgentRequest {
@@ -186,6 +216,7 @@ export interface ResearchPlanCard {
   entry_point: string;
   experiment_suggestion: string;
   recommended_papers: string[];
+  recommended_refs: EvidenceRef[];
   risks: string[];
   next_action: string;
 }
@@ -201,6 +232,7 @@ export interface ResearchPlanAgentResponse {
   final_cards: ResearchPlanCard[];
   evidence_status: EvidenceStatus;
   warnings: string[];
+  warning_codes: string[];
 }
 
 export interface CitationNode {
@@ -222,6 +254,7 @@ export interface CitationGraphResponse {
   links: CitationLink[];
   evidence_status: EvidenceStatus;
   warnings: string[];
+  warning_codes: string[];
 }
 
 export interface NoteCreateRequest {

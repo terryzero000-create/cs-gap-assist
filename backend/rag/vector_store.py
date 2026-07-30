@@ -73,6 +73,11 @@ class InMemoryVectorStore:
     ) -> list[PaperChunk]:
         return [entry.chunk for entry in self._filter_entries(doc_ids, tags, module_source)]
 
+    def delete_chunks(self, chunk_ids: list[str]) -> None:
+        """Delete exact chunk IDs from the memory store."""
+        remove = set(chunk_ids)
+        self.entries = [entry for entry in self.entries if entry.chunk.chunk_id not in remove]
+
     def _filter_entries(
         self,
         doc_ids: list[str] | None = None,
@@ -119,12 +124,25 @@ class ChromaVectorStore:
             return
         try:
             import chromadb  # type: ignore[import-not-found]
+            from chromadb.config import Settings as ChromaSettings  # type: ignore[import-not-found]
 
             self.persist_directory.mkdir(parents=True, exist_ok=True)
-            client = chromadb.PersistentClient(path=str(self.persist_directory))
+            client = chromadb.PersistentClient(
+                path=str(self.persist_directory),
+                settings=ChromaSettings(anonymized_telemetry=False),
+            )
             existing = {item.name for item in client.list_collections()}
             if collection_name in existing:
-                self.collection = client.get_collection(collection_name)
+                candidate = client.get_collection(collection_name)
+                if (
+                    profile is not None
+                    and (candidate.metadata or {}).get("profile_key")
+                    != profile.key
+                ):
+                    raise VectorDimensionError(
+                        "Existing collection metadata does not match the configured profile."
+                    )
+                self.collection = candidate
             elif create_if_missing:
                 metadata = self._profile_metadata(profile) if profile else None
                 self.collection = client.get_or_create_collection(collection_name, metadata=metadata)
@@ -135,11 +153,17 @@ class ChromaVectorStore:
     @staticmethod
     def _profile_metadata(profile: EmbeddingProfile) -> dict[str, str | int]:
         return {
-            "hnsw:space": "cosine",
+            "hnsw:space": profile.metric,
             "schema_version": profile.schema_version,
             "embedding_provider": profile.provider,
             "embedding_model": profile.model,
             "embedding_dimension": profile.dimension,
+            "service_id": profile.service_id,
+            "protocol_version": profile.protocol_version,
+            "metric": profile.metric,
+            "normalization": profile.normalization,
+            "domain_compatibility": profile.domain_compatibility,
+            "chunker_schema": profile.chunker_schema,
             "profile_key": profile.key,
         }
 
@@ -265,6 +289,14 @@ class ChromaVectorStore:
             )
         return chunks
 
+    def delete_chunks(self, chunk_ids: list[str]) -> None:
+        """Delete exact chunk IDs from both mirrors."""
+        if not chunk_ids:
+            return
+        self.memory.delete_chunks(chunk_ids)
+        if self.collection is not None:
+            self.collection.delete(ids=chunk_ids)
+
     def get_entry(self, chunk_id: str, include_embedding: bool = False) -> dict[str, Any] | None:
         if self.collection is None:
             return None
@@ -309,9 +341,29 @@ def _cached_vector_store(
     provider: str,
     model: str,
     dimension: int,
+    metric: str,
+    service_id: str,
+    protocol_version: str,
+    normalization: str,
+    domain_compatibility: str,
+    chunker_schema: str,
     create_if_missing: bool,
 ) -> ChromaVectorStore:
-    profile = EmbeddingProfile(provider=provider, model=model, dimension=dimension) if profile_key else None
+    profile = (
+        EmbeddingProfile(
+            provider=provider,
+            model=model,
+            dimension=dimension,
+            metric=metric,
+            service_id=service_id,
+            protocol_version=protocol_version,
+            normalization=normalization,
+            domain_compatibility=domain_compatibility,
+            chunker_schema=chunker_schema,
+        )
+        if profile_key
+        else None
+    )
     return ChromaVectorStore(
         persist_directory, collection_name, profile=profile, create_if_missing=create_if_missing
     )
@@ -332,6 +384,12 @@ def get_vector_store(
         profile.provider if profile else "",
         profile.model if profile else "",
         profile.dimension if profile else 0,
+        profile.metric if profile else "",
+        profile.service_id if profile else "",
+        profile.protocol_version if profile else "",
+        profile.normalization if profile else "",
+        profile.domain_compatibility if profile else "",
+        profile.chunker_schema if profile else "",
         create_if_missing,
     )
 

@@ -1,6 +1,7 @@
 import { DragEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 
 import {
+  ApiClientError,
   createKnowledgeNote,
   listKnowledgePapers,
   searchKnowledge,
@@ -35,11 +36,11 @@ function formatDate(value: string): string {
 }
 
 function readableError(error: unknown, fallback: string): string {
+  if (error instanceof ApiClientError) {
+    return `${fallback}（${error.errorCode}）${error.message}${error.retryable ? ' 可稍后重试。' : ''}`;
+  }
   if (!(error instanceof Error)) {
     return fallback;
-  }
-  if (/failed to fetch|unexpected end of json|networkerror/i.test(error.message)) {
-    return `${fallback} 请确认本地后端服务已启动。`;
   }
   return error.message;
 }

@@ -4,11 +4,14 @@ from xml.etree import ElementTree
 
 import httpx
 
+from backend.core.sanitize import safe_exception_message
 from backend.services.external_paper import ExternalPaper
 
 
 _CACHE: dict[str, tuple[float, list[ExternalPaper]]] = {}
 _LAST_LIVE_REQUEST_AT = 0.0
+_IN_FLIGHT: dict[tuple[int, str], asyncio.Task[tuple[list[ExternalPaper], list[str]]]] = {}
+_RATE_LOCKS: dict[int, asyncio.Lock] = {}
 
 
 class ArxivSearchClient:
@@ -51,6 +54,28 @@ class ArxivSearchClient:
             "sortBy": "relevance",
             "sortOrder": "descending",
         }
+        if self.transport is None:
+            inflight_key = (id(asyncio.get_running_loop()), cache_key)
+            existing = _IN_FLIGHT.get(inflight_key)
+            if existing is not None:
+                return await existing
+            task = asyncio.create_task(
+                self._search_uncached(params, safe_limit, cache_key)
+            )
+            _IN_FLIGHT[inflight_key] = task
+            try:
+                return await task
+            finally:
+                _IN_FLIGHT.pop(inflight_key, None)
+        return await self._search_uncached(params, safe_limit, cache_key)
+
+    async def _search_uncached(
+        self,
+        params: dict[str, str],
+        safe_limit: int,
+        cache_key: str,
+    ) -> tuple[list[ExternalPaper], list[str]]:
+        """Run one deduplicated request and cache successful live results."""
         try:
             await self._respect_rate_limit()
             async with httpx.AsyncClient(
@@ -67,17 +92,24 @@ class ArxivSearchClient:
                 return selected, []
             return [], ["arXiv returned no results."]
         except Exception as exc:
-            return [], [f"arXiv request failed: {exc}"]
+            return [], [
+                f"arXiv request failed: {safe_exception_message(exc)}"
+            ]
 
     async def _respect_rate_limit(self) -> None:
         """Throttle live arXiv calls while keeping injected test transports immediate."""
         global _LAST_LIVE_REQUEST_AT
         if self.transport is not None or self.min_interval_seconds <= 0:
             return
-        delay = self.min_interval_seconds - (time.monotonic() - _LAST_LIVE_REQUEST_AT)
-        if delay > 0:
-            await asyncio.sleep(delay)
-        _LAST_LIVE_REQUEST_AT = time.monotonic()
+        loop_id = id(asyncio.get_running_loop())
+        lock = _RATE_LOCKS.setdefault(loop_id, asyncio.Lock())
+        async with lock:
+            delay = self.min_interval_seconds - (
+                time.monotonic() - _LAST_LIVE_REQUEST_AT
+            )
+            if delay > 0:
+                await asyncio.sleep(delay)
+            _LAST_LIVE_REQUEST_AT = time.monotonic()
 
     async def _get_with_retry(self, client: httpx.AsyncClient, params: dict[str, str]) -> httpx.Response:
         """Retry rate-limited requests twice without substituting local data."""

@@ -2,7 +2,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
@@ -14,8 +17,14 @@
     "d3": "latest"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "latest",
+    "@testing-library/react": "latest",
+    "@testing-library/user-event": "latest",
+    "@playwright/test": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "@types/d3": "latest"
+    "@types/d3": "latest",
+    "jsdom": "latest",
+    "vitest": "latest"
   }
 }

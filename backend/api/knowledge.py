@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from backend.core.config import get_settings
 from backend.core.errors import ApiError
@@ -17,7 +17,10 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 
 @router.get("/papers", response_model=list[PaperRecord])
-async def list_knowledge_papers(tag: str | None = None, favorites_only: bool = False) -> list[PaperRecord]:
+async def list_knowledge_papers(
+    tag: str | None = Query(default=None, max_length=50),
+    favorites_only: bool = False,
+) -> list[PaperRecord]:
     """List papers stored in the personal knowledge base."""
     papers = SQLiteStore(get_settings().sqlite_path).list_papers()
     if tag:
@@ -47,13 +50,19 @@ async def create_note(request: NoteCreateRequest) -> NoteRecord:
 
 
 @router.get("/notes", response_model=list[NoteRecord])
-async def list_notes(query: str | None = None) -> list[NoteRecord]:
+async def list_notes(
+    query: str | None = Query(default=None, max_length=500),
+) -> list[NoteRecord]:
     """List notes, optionally filtered by text query."""
     return SQLiteStore(get_settings().sqlite_path).list_notes(query)
 
 
 @router.get("/search", response_model=KnowledgeSearchResponse)
-async def search_knowledge(query: str = "", tag: str | None = None, favorites_only: bool = False) -> KnowledgeSearchResponse:
+async def search_knowledge(
+    query: str = Query(default="", max_length=500),
+    tag: str | None = Query(default=None, max_length=50),
+    favorites_only: bool = False,
+) -> KnowledgeSearchResponse:
     """Search papers, notes, chunks, gap history, and experiment history."""
     store = SQLiteStore(get_settings().sqlite_path)
     all_papers = store.list_papers()

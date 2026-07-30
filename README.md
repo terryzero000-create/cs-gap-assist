@@ -19,7 +19,7 @@ CS Gap Assist 是一个面向计算机科学论文的研究规划助手。它把
 
 - Backend: FastAPI, Pydantic, SQLite, optional Chroma mirror, pytest
 - Frontend: React, Vite, TypeScript, D3
-- Model layer: DeepSeek chat provider, OpenAI/local embedding options, deterministic mock fallback
+- Model layer: DeepSeek/optional OpenAI chat providers, XFYUN Spark embedding；测试模式可显式使用 synthetic provider
 - Literature sources: arXiv by default; OpenAlex is optional for citation graph expansion
 
 Semantic Scholar 已废弃，不用于新的文献检索或引用图谱流程。
@@ -52,7 +52,7 @@ macOS/Linux:
 cp .env.example .env
 ```
 
-没有真实 API key 也可以运行。缺少 `DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY` 时，系统会使用本地 mock provider 并返回 warning。
+先在 `.env` 设置一个只供本机使用的 `APP_API_KEY`。前端首次打开时会要求输入该 token，并且只写入当前标签页的 `sessionStorage`。缺少真实模型凭据时，生产/开发环境不会伪造可信研究结论；`mock` 仅限 `APP_ENV=test` 或显式 `ALLOW_SYNTHETIC_MODE=true`。
 
 ### 2. 安装依赖
 
@@ -60,6 +60,12 @@ cp .env.example .env
 
 ```powershell
 python -m pip install -e ".[dev,rag,xfyun]"
+```
+
+可选 OCR 与 cross-encoder：
+
+```powershell
+python -m pip install -e ".[pdf-advanced,rerank]"
 ```
 
 前端：
@@ -115,10 +121,11 @@ macOS/Linux:
 python -m pytest backend/tests -q
 ```
 
-运行前端类型检查：
+运行前端组件测试与类型检查：
 
 ```powershell
 npm test --prefix frontend
+npm run typecheck --prefix frontend
 ```
 
 构建前端：
@@ -131,9 +138,13 @@ npm run build --prefix frontend
 
 | Endpoint | 说明 |
 | --- | --- |
-| `GET /api/v1/health` | 健康检查 |
+| `GET /health/live`（兼容 `/api/v1/health/live`） | 无鉴权进程存活检查 |
+| `GET /health/ready`（兼容 `/api/v1/health/ready`） | 无鉴权依赖与 active index readiness |
 | `GET /api/v1/config/models` | 查看可用模型和 fallback 状态 |
-| `POST /api/v1/papers/upload` | 上传 PDF，返回 `doc_id` 和 chunk 数量 |
+| `POST /api/v1/paper-uploads` | 需要 `Idempotency-Key`，异步接收 PDF，返回 202 |
+| `GET /api/v1/paper-uploads/{upload_id}` | 查询上传阶段和结构化错误 |
+| `POST /api/v1/paper-uploads/{upload_id}/retry` | 重试 retryable 失败 |
+| `POST /api/v1/papers/upload` | 一个版本周期内保留的受限同步兼容接口 |
 | `GET /api/v1/papers` | 列出已上传论文 |
 | `POST /api/v1/reading/qa` | 对选中论文提问 |
 | `POST /api/v1/research-plan-agent/run` | 生成研究路线规划 |
@@ -144,18 +155,25 @@ npm run build --prefix frontend
 | `POST /api/v1/experiments/suggest` | 独立实验建议 |
 | `GET /api/v1/experiments/history` | 实验建议历史 |
 | `GET /api/v1/knowledge/search` | 知识库搜索 |
-| `GET /api/v1/vector-index/status` | 查看向量索引、缺失 chunks 和最近迁移状态 |
+| `GET /api/v1/vector-index/status` | 查看 v4 索引、missing/orphan 和迁移状态 |
+| `GET /api/v1/metrics` | 仅返回耗时/计数/P95 等聚合统计 |
 
-上传论文示例：
+异步上传示例：
 
 ```powershell
-curl.exe -F "file=@paper.pdf" http://127.0.0.1:8002/api/v1/papers/upload
+curl.exe -X POST `
+  -H "Authorization: Bearer $env:APP_API_KEY" `
+  -H "Idempotency-Key: paper-20260730-001" `
+  -F "file=@paper.pdf;type=application/pdf" `
+  http://127.0.0.1:8002/api/v1/paper-uploads
 ```
 
 引用图谱示例：
 
 ```powershell
-Invoke-RestMethod "http://127.0.0.1:8002/api/v1/citations/graph?keyword=retrieval%20augmented%20generation&max_nodes=15"
+Invoke-RestMethod `
+  -Headers @{ Authorization = "Bearer $env:APP_API_KEY" } `
+  "http://127.0.0.1:8002/api/v1/citations/graph?keyword=retrieval%20augmented%20generation&max_nodes=15"
 ```
 
 ## 环境变量
@@ -164,13 +182,22 @@ Invoke-RestMethod "http://127.0.0.1:8002/api/v1/citations/graph?keyword=retrieva
 
 | 变量 | 用途 |
 | --- | --- |
+| `APP_ENV` | `development`、`test` 或 `production`；test 完全忽略本地 `.env` |
+| `APP_API_KEY` | 除 health 外所有 API 的 Bearer token |
+| `ALLOW_SYNTHETIC_MODE` | 仅显式开发测试时开启，默认 false |
 | `DEEPSEEK_API_KEY` | DeepSeek chat model key |
-| `OPENAI_API_KEY` | OpenAI embedding key |
+| `OPENAI_API_KEY` | 可选 OpenAI chat provider key；不用于 embedding |
 | `SQLITE_URL` | 本地 SQLite 数据库路径，默认 `data/app.db` |
 | `CHROMA_DIR` | Chroma 本地目录，默认 `data/chroma` |
+| `DOCUMENT_DIR` | 按 doc/revision 保存原始 PDF 的目录 |
 | `DEFAULT_CHAT_PROVIDER` | 默认聊天模型 provider |
 | `DEFAULT_CHAT_MODEL` | 默认聊天模型 |
-| `DEFAULT_EMBEDDING_PROVIDER` | 默认 embedding provider |
+| `DEFAULT_EMBEDDING_PROVIDER` | 默认 embedding provider，正式配置为 `xfyun-spark` |
+| `DEFAULT_EMBEDDING_MODEL` | 查询使用 `query`；论文入库时自动切换为 `para` |
+| `XFYUN_SPARK_APP_ID` | 讯飞 Spark Embedding app ID |
+| `XFYUN_SPARK_API_KEY` | 讯飞 Spark Embedding API key |
+| `XFYUN_SPARK_API_SECRET` | 讯飞 Spark Embedding API secret |
+| `XFYUN_SPARK_EMBEDDING_URL` | 讯飞 Spark Embedding 服务地址 |
 | `LOCAL_BGE_M3_BASE_URL` | 本地 BGE-M3 embedding 服务地址 |
 | `ENABLE_OPENALEX` | 是否启用 OpenAlex 引用扩展 |
 | `OPENALEX_API_KEY` | OpenAlex API key |
@@ -181,7 +208,7 @@ Invoke-RestMethod "http://127.0.0.1:8002/api/v1/citations/graph?keyword=retrieva
 
 ## 向量索引维护
 
-向量索引以 SQLite chunks 为可重建的数据源。真实 embedding 服务失败时不会把 fallback 向量写入真实 collection；上传会返回 503，查询会降级为 SQLite 词法检索。
+向量索引以 active revision 的 SQLite chunks 为可重建数据源。真实 embedding 服务失败时不会写入 fallback vector；异步任务进入 `failed + retryable + EMBEDDING_UNAVAILABLE`，查询明确降级到 FTS5/BM25。v4 collection 使用完整 profile fingerprint 和 cosine metric，不按维度信任 legacy collection。
 
 查看迁移计划（默认只读，不迁移）：
 
@@ -201,7 +228,20 @@ python -m backend.scripts.migrate_vector_index --apply
 python -m backend.scripts.migrate_vector_index --verify-only
 ```
 
-迁移使用稳定的 collection 名、chunk ID 和内容哈希，可以重复执行。成功切换后仍保留 legacy collection，不会自动删除旧向量。
+迁移先输出 profile、稳定 chunk ID、内容哈希清单；apply 前自动备份 SQLite 与 Chroma。只有 profile、内容哈希、missing 和检索 smoke test 都通过才切换。任何 `reupload_required` 论文都会阻止迁移激活。成功后仍保留 legacy collection，不自动删除旧向量。
+
+经审批的旧数据隔离命令（默认仅 dry-run，严格校验 14/21/6/4 计数）：
+
+```powershell
+python -m backend.scripts.harden_legacy_data
+python -m backend.scripts.harden_legacy_data --apply
+```
+
+RAG 评测需要在保留论文重传后人工标注 36–50 条问题。模板和 release gate 位于 `backend/evals/`：
+
+```powershell
+python -m backend.evals.evaluate_rag --dataset path/to/reviewed-rag-corpus.json
+```
 
 ## 项目结构
 
@@ -226,11 +266,11 @@ docs/
 
 ## 当前限制
 
-- 这是本地 MVP，不是生产部署。
-- 多数外部模型和文献服务都有 deterministic fallback，方便无 key 开发。
-- 真实 DeepSeek、OpenAI、OpenAlex 行为仍需要 API key 和集成测试。
-- RAG ranking 仍偏简单，适合开发验证，不适合作为最终学术质量判断。
-- Chroma 是可选依赖；不可用时查询会降级到 SQLite 词法检索。不要手工删除 legacy collection，应使用迁移命令检查和重建索引。
+- 这是绑定 `127.0.0.1` 的本机单用户部署，不包含多用户账号体系。
+- 真实 DeepSeek、讯飞 Spark Embedding、OpenAlex smoke test 需要凭据，只能手动运行，不进入默认离线 CI。
+- OCR 与 cross-encoder 是可选增强；OCR 缺失时扫描件返回 retryable `OCR_REQUIRED`，不会成功入库为空论文。
+- 保留的 4 篇旧论文在原始 PDF 重传前保持 `reupload_required`，其 legacy chunks 和 vectors 不进入正常检索。
+- 完美数学公式识别不在本轮范围；无法确认的公式不做猜测。
 - 复现实验室只生成辅助报告和模板，不执行代码，不承诺复现论文指标。
 
 ## 更多文档

@@ -9,3 +9,4 @@ class ExternalPaper:
     title: str
     abstract: str
     year: int | None = None
+    canonical_url: str = ""

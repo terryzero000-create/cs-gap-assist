@@ -31,14 +31,20 @@ npm install --prefix frontend
 
 Copy `.env.example` to `.env` and set the keys available in your environment.
 
-Required for real model behavior:
+Required for the default real chat and embedding behavior:
 
 ```env
 DEEPSEEK_API_KEY=
-OPENAI_API_KEY=
+DEFAULT_EMBEDDING_PROVIDER=xfyun-spark
+DEFAULT_EMBEDDING_MODEL=query
+XFYUN_SPARK_APP_ID=
+XFYUN_SPARK_API_KEY=
+XFYUN_SPARK_API_SECRET=
 ```
 
-The app still runs without these keys by using deterministic mock providers with explicit warnings.
+`OPENAI_API_KEY` is optional and is used only when selecting the optional OpenAI chat provider; it is not used for embeddings.
+
+Without `DEEPSEEK_API_KEY`, chat generation uses the deterministic mock provider with an explicit warning. Without complete XFYUN Spark credentials, production paper indexing is rejected so fallback vectors cannot pollute the real index. For development-only indexing, explicitly set `DEFAULT_EMBEDDING_PROVIDER=mock` and `DEFAULT_EMBEDDING_MODEL=mock-embedding`.
 
 Default external literature behavior:
 

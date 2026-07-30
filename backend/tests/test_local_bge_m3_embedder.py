@@ -36,27 +36,25 @@ def test_get_embedding_provider_resolves_local_bge_m3() -> None:
 
 def test_xfyun_spark_provider_marks_fallback_on_api_error(monkeypatch) -> None:
     """Spark failures must be marked so their vectors cannot pollute a real index."""
+    async def no_wait(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", no_wait)
     provider = XfyunSparkEmbeddingProvider(
         Settings(
             xfyun_spark_app_id="app",
             xfyun_spark_api_key="key",
             xfyun_spark_api_secret="secret",
-        )
-    )
-
-    monkeypatch.setattr(
-        provider,
-        "_embed_single_sync",
-        lambda text: (_ for _ in ()).throw(RuntimeError("Xfyun Spark API error (code=11202): licc failed")),
+        ),
+        transport=httpx.MockTransport(lambda _request: httpx.Response(503)),
     )
 
     result = asyncio.run(provider.embed(["paper chunk"]))
     vectors, warnings = result
 
-    assert len(vectors) == 1
-    assert len(vectors[0]) == 2560
+    assert vectors == []
     assert result.is_fallback is True
-    assert "lexical fallback" in warnings[0]
+    assert "lexical retrieval remains available" in warnings[0]
 
 
 def test_xfyun_spark_provider_uses_configured_default_domain() -> None:

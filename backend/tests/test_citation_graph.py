@@ -6,31 +6,28 @@ from backend.main import app
 from backend.services.citation_graph import CitationGraphService, ExternalCitationPaper, OpenAlexCitationClient
 
 
-def test_citation_graph_returns_d3_nodes_and_links() -> None:
+def test_citation_graph_returns_empty_when_openalex_is_disabled() -> None:
     client = TestClient(app)
 
     response = client.get("/api/v1/citations/graph", params={"keyword": "retrieval augmented generation", "max_nodes": 5})
 
     assert response.status_code == 200
     body = response.json()
-    assert body["nodes"]
-    assert body["links"]
-    assert body["nodes"][0]["id"]
-    assert body["nodes"][0]["importance_score"] >= 0
-    assert any(node["is_key"] for node in body["nodes"])
-    assert {"source", "target", "relation"}.issubset(body["links"][0].keys())
+    assert body["nodes"] == []
+    assert body["links"] == []
+    assert body["evidence_status"] == "provider_unavailable"
 
 
-def test_citation_graph_caps_nodes_and_keeps_valid_links() -> None:
+def test_citation_graph_does_not_create_demo_nodes() -> None:
     client = TestClient(app)
 
     response = client.get("/api/v1/citations/graph", params={"keyword": "retrieval augmented generation", "max_nodes": 3})
 
     assert response.status_code == 200
     body = response.json()
-    node_ids = {node["id"] for node in body["nodes"]}
-    assert len(body["nodes"]) == 3
-    assert all(link["source"] in node_ids and link["target"] in node_ids for link in body["links"])
+    assert body["nodes"] == []
+    assert body["links"] == []
+    assert not any(node.get("id", "").startswith("paper-") for node in body["nodes"])
 
 
 def test_openalex_citation_papers_are_ranked_and_capped() -> None:
@@ -92,6 +89,7 @@ def test_openalex_citation_papers_are_ranked_and_capped() -> None:
     assert "openalex-W5" not in node_ids
     assert all(link.source in node_ids and link.target in node_ids for link in graph.links)
     assert graph.warnings == ["OpenAlex fake client used."]
+    assert graph.evidence_status == "verified"
 
 
 def test_openalex_client_requires_api_key() -> None:
@@ -100,4 +98,19 @@ def test_openalex_client_requires_api_key() -> None:
     papers, warnings = asyncio.run(client.search("retrieval augmented generation", limit=3))
 
     assert papers == []
-    assert warnings == ["OPENALEX_API_KEY missing; using deterministic citation graph data."]
+    assert warnings == ["OPENALEX_API_KEY missing; OpenAlex evidence is unavailable."]
+
+
+def test_real_openalex_nodes_without_relationships_do_not_get_fake_links() -> None:
+    class NodeOnlyClient:
+        async def search(self, keyword: str, limit: int):
+            return [
+                ExternalCitationPaper(paper_id="W1", title="Paper one"),
+                ExternalCitationPaper(paper_id="W2", title="Paper two"),
+            ], []
+
+    graph = asyncio.run(CitationGraphService(NodeOnlyClient()).build_graph("rag", use_openalex=True))
+
+    assert len(graph.nodes) == 2
+    assert graph.links == []
+    assert graph.evidence_status == "verified"

@@ -1,0 +1,14 @@
+{
+  "version": "manual-corpus-v1",
+  "instructions": "Create 36-50 manually reviewed cases only after the retained source PDFs have been re-uploaded. Do not infer relevant chunk IDs from legacy vectors.",
+  "cases": [
+    {
+      "id": "replace-with-reviewed-case",
+      "language": "zh",
+      "question": "人工标注问题",
+      "doc_ids": ["active-doc-id"],
+      "answerable": true,
+      "relevant_chunk_ids": ["chunker-v2-stable-id"]
+    }
+  ]
+}

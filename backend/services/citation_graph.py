@@ -1,8 +1,10 @@
+import asyncio
 from dataclasses import dataclass, field
 from typing import Protocol
 
 import httpx
 
+from backend.core.sanitize import safe_exception_message
 from backend.models.schemas import CitationGraphResponse, CitationLink, CitationNode
 
 
@@ -27,7 +29,7 @@ class CitationClient(Protocol):
 
 
 class OpenAlexCitationClient:
-    """OpenAlex citation client with deterministic fallback handled by the service."""
+    """OpenAlex citation client that fails closed without manufacturing graph data."""
 
     def __init__(
         self,
@@ -45,28 +47,45 @@ class OpenAlexCitationClient:
     async def search(self, keyword: str, limit: int) -> tuple[list[ExternalCitationPaper], list[str]]:
         """Search OpenAlex works and attach lightweight reference/citation neighbors."""
         if not keyword.strip():
-            return [], ["OpenAlex query is empty; using deterministic citation graph data."]
+            return [], ["OpenAlex query is empty; no citation graph was requested."]
         if not self.api_key:
-            return [], ["OPENALEX_API_KEY missing; using deterministic citation graph data."]
+            return [], ["OPENALEX_API_KEY missing; OpenAlex evidence is unavailable."]
         params = {
             "search": keyword,
-            "per-page": str(max(1, min(limit, 25))),
+            "per_page": str(max(1, min(limit, 25))),
             "sort": "cited_by_count:desc",
             "select": "id,display_name,publication_year,cited_by_count,referenced_works",
             "api_key": self.api_key,
         }
         try:
             async with httpx.AsyncClient(transport=self.transport, timeout=self.timeout_seconds) as client:
-                response = await client.get(self.base_url, params=params)
-                response.raise_for_status()
+                response = await self._get_with_retry(client, params)
                 data = response.json()
                 papers = [self._paper_from_item(item) for item in data.get("results", []) if self._is_work_item(item)]
                 if not papers:
-                    return [], ["OpenAlex returned no works; using deterministic citation graph data."]
+                    return [], ["OpenAlex returned no works."]
                 expanded = await self._attach_neighbors(client, papers[:limit])
                 return expanded, []
         except Exception as exc:
-            return [], [f"OpenAlex request failed ({exc}); using deterministic citation graph data."]
+            return [], [
+                f"OpenAlex request failed: {safe_exception_message(exc)}"
+            ]
+
+    async def _get_with_retry(self, client: httpx.AsyncClient, params: dict[str, str]) -> httpx.Response:
+        """Honor Retry-After and retry rate-limited OpenAlex requests twice."""
+        response: httpx.Response | None = None
+        for attempt in range(3):
+            response = await client.get(self.base_url, params=params)
+            if response.status_code != 429:
+                response.raise_for_status()
+                return response
+            if attempt < 2:
+                retry_after = response.headers.get("Retry-After")
+                delay = float(retry_after) if retry_after and retry_after.replace(".", "", 1).isdigit() else 2**attempt
+                await asyncio.sleep(min(max(delay, 0.0), 10.0))
+        assert response is not None
+        response.raise_for_status()
+        return response
 
     async def _attach_neighbors(
         self,
@@ -76,9 +95,20 @@ class OpenAlexCitationClient:
         """Attach a small number of citation neighbors for the highest-ranked works."""
         expanded: list[ExternalCitationPaper] = []
         lookup = {paper.paper_id: paper for paper in papers}
-        for paper in papers:
-            references = [lookup[work_id] for work_id in paper.references[0:2] if work_id.paper_id in lookup]
-            citations = await self._fetch_citations(client, paper.paper_id, limit=2)
+        citation_tasks: list[asyncio.Task[list[ExternalCitationPaper]]] = []
+        async with asyncio.TaskGroup() as group:
+            for paper in papers:
+                citation_tasks.append(
+                    group.create_task(
+                        self._fetch_citations(client, paper.paper_id, limit=2)
+                    )
+                )
+        for paper, citation_task in zip(papers, citation_tasks, strict=True):
+            references = [
+                lookup[work_id.paper_id]
+                for work_id in paper.references[0:2]
+                if work_id.paper_id in lookup
+            ]
             expanded.append(
                 ExternalCitationPaper(
                     paper_id=paper.paper_id,
@@ -87,7 +117,7 @@ class OpenAlexCitationClient:
                     citation_count=paper.citation_count,
                     influential_citation_count=paper.influential_citation_count,
                     references=references,
-                    citations=citations,
+                    citations=citation_task.result(),
                 )
             )
         return expanded
@@ -106,8 +136,9 @@ class OpenAlexCitationClient:
             "select": "id,display_name,publication_year,cited_by_count",
             "api_key": self.api_key or "",
         }
-        response = await client.get(self.base_url, params=params)
-        if response.status_code >= 400:
+        try:
+            response = await self._get_with_retry(client, params)
+        except Exception:
             return []
         data = response.json()
         return [self._paper_from_item(item) for item in data.get("results", []) if self._is_work_item(item)]
@@ -150,20 +181,29 @@ class CitationGraphService:
         use_openalex: bool = False,
     ) -> CitationGraphResponse:
         """Return a citation graph for an input keyword."""
-        safe_keyword = keyword.strip() or "unknown topic"
+        safe_keyword = keyword.strip()
         capped_nodes = max(3, min(max_nodes, 50))
-        if use_openalex:
-            papers, warnings = await self.citation_client.search(safe_keyword, limit=capped_nodes)
-            if papers:
-                graph = self._graph_from_external_papers(papers, capped_nodes)
-                graph.warnings.extend(warnings)
-                return graph
-            fallback = self._fallback_graph(safe_keyword, capped_nodes)
-            fallback.warnings.extend(warnings)
-            return fallback
-        graph = self._fallback_graph(safe_keyword, capped_nodes)
-        graph.warnings.append("OpenAlex citation expansion is disabled; using deterministic MVP data.")
-        return graph
+        if not safe_keyword:
+            return CitationGraphResponse(
+                nodes=[],
+                links=[],
+                evidence_status="insufficient_evidence",
+                warnings=["Citation keyword is empty."],
+            )
+        if not use_openalex:
+            return CitationGraphResponse(
+                nodes=[],
+                links=[],
+                evidence_status="provider_unavailable",
+                warnings=["OpenAlex citation expansion is disabled."],
+            )
+        papers, warnings = await self.citation_client.search(safe_keyword, limit=capped_nodes)
+        if papers:
+            graph = self._graph_from_external_papers(papers, capped_nodes)
+            graph.warnings.extend(warnings)
+            return graph
+        status = "provider_unavailable" if any("missing" in warning.lower() or "failed" in warning.lower() for warning in warnings) else "insufficient_evidence"
+        return CitationGraphResponse(nodes=[], links=[], evidence_status=status, warnings=warnings)
 
     def _graph_from_external_papers(
         self,
@@ -196,27 +236,7 @@ class CitationGraphService:
         ]
         node_ids = {node.id for node in nodes}
         valid_links = [link for link in links if link.source in node_ids and link.target in node_ids]
-        if not valid_links and len(nodes) > 1:
-            valid_links = [CitationLink(source=nodes[0].id, target=node.id) for node in nodes[1:]]
-        return CitationGraphResponse(nodes=nodes, links=valid_links, warnings=[])
-
-    def _fallback_graph(self, keyword: str, max_nodes: int) -> CitationGraphResponse:
-        """Return deterministic graph data when OpenAlex is disabled or unavailable."""
-        nodes = [
-            CitationNode(id="paper-root", title=f"Survey of {keyword}", year=2025, importance_score=1.0, is_key=True),
-            CitationNode(id="paper-method", title=f"Core method for {keyword}", year=2024, importance_score=0.82, is_key=True),
-            CitationNode(id="paper-eval", title=f"Evaluation benchmark for {keyword}", year=2023, importance_score=0.66),
-            CitationNode(id="paper-origin", title=f"Early work on {keyword}", year=2021, importance_score=0.52),
-            CitationNode(id="paper-application", title=f"Applied system for {keyword}", year=2022, importance_score=0.46),
-        ][:max_nodes]
-        node_ids = {node.id for node in nodes}
-        links = [
-            CitationLink(source="paper-root", target="paper-method"),
-            CitationLink(source="paper-root", target="paper-eval"),
-            CitationLink(source="paper-method", target="paper-origin"),
-            CitationLink(source="paper-eval", target="paper-application"),
-        ]
-        return CitationGraphResponse(nodes=nodes, links=[link for link in links if link.source in node_ids and link.target in node_ids])
+        return CitationGraphResponse(nodes=nodes, links=valid_links, evidence_status="verified", warnings=[])
 
     def _paper_rank(self, paper: ExternalCitationPaper) -> float:
         """Score key nodes by citations, influential citations, and recency."""

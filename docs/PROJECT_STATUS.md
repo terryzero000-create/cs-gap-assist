@@ -113,9 +113,11 @@ The project has a working repository foundation, one feature branch per module, 
 - Default chat provider: DeepSeek.
 - Default chat model: `deepseek-v4-pro`.
 - Alternate DeepSeek model exposed: `deepseek-v4-flash`.
-- Default embedding provider: OpenAI.
-- Default embedding model: `text-embedding-3-small`.
-- If `DEEPSEEK_API_KEY` or `OPENAI_API_KEY` is missing, the system should still run using mock providers and return warnings.
+- Default embedding provider: XFYUN Spark.
+- Default embedding query domain: `query`; uploaded paper chunks use the `para` domain automatically.
+- Missing `DEEPSEEK_API_KEY` degrades chat generation to the mock provider with warnings.
+- Missing XFYUN Spark credentials prevents production vector indexing; query failures degrade to SQLite lexical retrieval without writing fallback vectors into the real index.
+- OpenAI remains an optional chat provider only and is not registered as an embedding provider.
 
 ## External Literature Policy
 
@@ -159,7 +161,7 @@ Latest focused `codex/integration-mvp` verification during the 2026-06-30 route-
 - Reading QA, Research Plan Agent, Reproduction Lab, Citation Graph, and Knowledge Base have usable MVP workflows in the integrated app.
 - Research Gap and Experiment Suggestion are preserved as APIs and internal Agent tools, but are no longer separate top-level route-planning tabs.
 - RAG ranking is simple and designed for local development, not production retrieval quality.
-- DeepSeek and OpenAI real calls need real API keys and further integration testing.
+- DeepSeek and XFYUN Spark real calls need their configured credentials and further integration testing; OpenAI is optional for chat only.
 - Chroma is optional in tests; the memory mirror preserves local behavior.
 - There is no deployment configuration yet.
 

@@ -1,6 +1,9 @@
 export interface ApiErrorPayload {
   error: string;
   code: number;
+  error_code: string;
+  retryable: boolean;
+  details: Record<string, unknown>;
 }
 
 export interface ModelConfig {
@@ -10,11 +13,44 @@ export interface ModelConfig {
   embedding_model?: string;
 }
 
+export type EvidenceStatus = 'verified' | 'local_only' | 'insufficient_evidence' | 'provider_unavailable' | 'synthetic';
+export type TrustStatus = 'verified' | 'local_only' | 'synthetic' | 'legacy_unverified';
+
+export interface EvidenceRef {
+  source: 'local' | 'arxiv' | 'openalex';
+  id: string;
+  title: string;
+  canonical_url: string;
+  doc_id?: string | null;
+  chunk_id?: string | null;
+  page?: number | null;
+}
+
 export interface PaperUploadResponse {
   doc_id: string;
   title: string;
   chunk_count: number;
   warnings: string[];
+  warning_codes: string[];
+  reupload_required?: boolean;
+}
+
+export type UploadStatus = 'received' | 'validating' | 'parsed' | 'chunked' | 'embedding' | 'indexed' | 'ready' | 'failed';
+
+export interface PaperUploadTaskResponse {
+  upload_id: string;
+  doc_id: string;
+  revision_id: string;
+  title: string;
+  status: UploadStatus;
+  status_url: string;
+  retryable: boolean;
+  error_code: string | null;
+  error: string | null;
+  page_count: number | null;
+  chunk_count: number;
+  warnings: string[];
+  warning_codes: string[];
 }
 
 export interface PaperRecord {
@@ -23,6 +59,9 @@ export interface PaperRecord {
   created_at: string;
   is_favorite: boolean;
   tags: string[];
+  active_revision_id?: string | null;
+  ingestion_status?: string;
+  reupload_required?: boolean;
 }
 
 export interface PaperListResponse {
@@ -53,7 +92,9 @@ export interface SourceParagraph {
 export interface ReadingQAResponse {
   answer: string;
   sources: SourceParagraph[];
+  evidence_status: EvidenceStatus;
   warnings: string[];
+  warning_codes: string[];
 }
 
 export interface ReadingQAHistoryItem {
@@ -70,12 +111,16 @@ export interface GapItem {
   value_level: 'high' | 'mid';
   description: string;
   evidence_papers: string[];
+  evidence_refs: EvidenceRef[];
+  trust_status: TrustStatus;
   created_at: string;
 }
 
 export interface GapAnalysisResponse {
   gaps: GapItem[];
+  evidence_status: EvidenceStatus;
   warnings: string[];
+  warning_codes: string[];
 }
 
 export interface ExperimentPlan {
@@ -88,11 +133,15 @@ export interface ExperimentPlan {
   steps: string[];
   risks: string[];
   support_papers: string[];
+  support_refs: EvidenceRef[];
+  trust_status: TrustStatus;
 }
 
 export interface ExperimentSuggestResponse {
   experiments: ExperimentPlan[];
+  evidence_status: EvidenceStatus;
   warnings: string[];
+  warning_codes: string[];
 }
 
 export type ReproductionMode = 'standard' | 'focused' | 'template';
@@ -142,6 +191,7 @@ export interface ReproductionAgentResponse {
   agent_steps: ReproductionAgentStep[];
   report: ReproductionReport;
   warnings: string[];
+  warning_codes: string[];
 }
 
 export interface ResearchPlanAgentRequest {
@@ -166,6 +216,7 @@ export interface ResearchPlanCard {
   entry_point: string;
   experiment_suggestion: string;
   recommended_papers: string[];
+  recommended_refs: EvidenceRef[];
   risks: string[];
   next_action: string;
 }
@@ -179,7 +230,9 @@ export interface ResearchPlanAgentResponse {
   agent_steps: ResearchPlanAgentStep[];
   routes: ResearchPlanRoute[];
   final_cards: ResearchPlanCard[];
+  evidence_status: EvidenceStatus;
   warnings: string[];
+  warning_codes: string[];
 }
 
 export interface CitationNode {
@@ -199,7 +252,9 @@ export interface CitationLink {
 export interface CitationGraphResponse {
   nodes: CitationNode[];
   links: CitationLink[];
+  evidence_status: EvidenceStatus;
   warnings: string[];
+  warning_codes: string[];
 }
 
 export interface NoteCreateRequest {

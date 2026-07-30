@@ -16,10 +16,11 @@ class StubArxivSearchClient:
     async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
         return [
             ExternalPaper(
-                paper_id=f"arxiv-{index}",
+                paper_id=f"arxiv-2501.{index:05d}",
                 title=f"Follow-up paper {index}",
                 abstract="Evidence for research planning.",
                 year=2026,
+                canonical_url=f"https://arxiv.org/abs/2501.{index:05d}",
             )
             for index in range(1, limit + 1)
         ], []

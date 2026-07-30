@@ -3,6 +3,10 @@ import asyncio
 import hashlib
 import json
 import os
+import shutil
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from backend.core.config import get_settings
@@ -19,16 +23,6 @@ from backend.services.vector_index import (
 def _migration_id(profile_key: str, source: str, target: str) -> str:
     payload = f"{profile_key}|{source}|{target}".encode("utf-8")
     return hashlib.sha256(payload).hexdigest()[:20]
-
-
-def _source_vector(source_store, chunk: PaperChunk, dimension: int) -> list[float] | None:
-    entry = source_store.get_entry(chunk.chunk_id, include_embedding=True)
-    if not entry or entry.get("document") != chunk.text:
-        return None
-    vector = entry.get("embedding")
-    if not isinstance(vector, list) or len(vector) != dimension:
-        return None
-    return [float(value) for value in vector]
 
 
 def _target_is_current(target_store, chunk: PaperChunk, profile_key: str) -> bool:
@@ -56,6 +50,22 @@ def migration_plan(manager: VectorIndexManager) -> dict[str, Any]:
     current = sum(_target_is_current(target, chunk, manager.profile.key) for chunk in chunks)
     source_ids = source.ids()
     sqlite_ids = {chunk.chunk_id for chunk in chunks}
+    manifest = [
+        {
+            "chunk_id": chunk.chunk_id,
+            "doc_id": chunk.doc_id,
+            "revision_id": chunk.revision_id,
+            "content_hash": chunk_content_hash(chunk),
+            "chunker_version": chunk.chunker_version,
+        }
+        for chunk in chunks
+    ]
+    manifest_sha256 = hashlib.sha256(
+        json.dumps(manifest, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    reupload_required = [
+        paper.doc_id for paper in sqlite.list_papers() if paper.reupload_required
+    ]
     return {
         "mode": "dry-run",
         "profile_key": manager.profile.key,
@@ -66,12 +76,30 @@ def migration_plan(manager: VectorIndexManager) -> dict[str, Any]:
         "pending_count": len(chunks) - current,
         "legacy_vector_count": len(source_ids),
         "legacy_orphan_count": len(source_ids - sqlite_ids),
+        "manifest_sha256": manifest_sha256,
+        "manifest": manifest,
+        "reupload_required_doc_ids": reupload_required,
     }
 
 
 async def apply_migration(manager: VectorIndexManager) -> dict[str, Any]:
     """Apply or resume the deterministic migration without deleting legacy data."""
     sqlite = manager.sqlite
+    reupload_required = [
+        paper.doc_id for paper in sqlite.list_papers() if paper.reupload_required
+    ]
+    if reupload_required:
+        return {
+            "mode": "apply",
+            "processed_count": 0,
+            "skipped_count": 0,
+            "failed_count": len(reupload_required),
+            "missing_count": 0,
+            "activated": False,
+            "error_code": "SOURCE_PDF_REUPLOAD_REQUIRED",
+            "reupload_required_doc_ids": reupload_required,
+            "target_collection": manager.profile.collection_name,
+        }
     profile = manager.profile
     source_name = LEGACY_COLLECTION
     target_name = profile.collection_name
@@ -80,10 +108,13 @@ async def apply_migration(manager: VectorIndexManager) -> dict[str, Any]:
     if not sqlite.acquire_vector_index_lock(owner):
         raise RuntimeError("Another vector index migration is already in progress.")
 
+    database_backup, chroma_backup = _migration_backups(
+        manager.settings.sqlite_path,
+        Path(manager.settings.chroma_dir),
+    )
     processed = 0
     skipped = 0
     failed = 0
-    source = get_vector_store(manager.settings, collection_name=source_name)
     target = get_vector_store(manager.settings, profile=profile, collection_name=target_name)
     provider = configured_embedding_provider(manager.settings, document=True)
     sqlite.save_vector_migration(migration_id, profile.key, source_name, target_name, "running")
@@ -93,17 +124,15 @@ async def apply_migration(manager: VectorIndexManager) -> dict[str, Any]:
             if _target_is_current(target, chunk, profile.key):
                 skipped += 1
                 continue
-            vector = _source_vector(source, chunk, profile.dimension)
-            if vector is None:
-                result = await provider.embed([chunk.text])
-                if result.is_fallback or not result.vectors or result.profile != profile:
-                    failed += 1
-                    sqlite.mark_vector_entries(
-                        [chunk], profile.key, target_name, {chunk.chunk_id: chunk_content_hash(chunk)},
-                        "failed", "Embedding provider returned fallback or an incompatible profile during migration.",
-                    )
-                    continue
-                vector = result.vectors[0]
+            result = await provider.embed([chunk.text])
+            if result.is_fallback or not result.vectors or result.profile != profile:
+                failed += 1
+                sqlite.mark_vector_entries(
+                    [chunk], profile.key, target_name, {chunk.chunk_id: chunk_content_hash(chunk)},
+                    "failed", "Embedding provider returned fallback or an incompatible profile during migration.",
+                )
+                continue
+            vector = result.vectors[0]
             try:
                 target.add_chunks([chunk], [vector])
                 sqlite.mark_vector_entries(
@@ -119,8 +148,21 @@ async def apply_migration(manager: VectorIndexManager) -> dict[str, Any]:
                 migration_id, profile.key, source_name, target_name, "running", processed, skipped, failed
             )
 
-        missing = [chunk.chunk_id for chunk in sqlite.list_chunks() if not _target_is_current(target, chunk, profile.key)]
-        if failed or missing:
+        source_chunks = sqlite.list_chunks()
+        missing = [
+            chunk.chunk_id
+            for chunk in source_chunks
+            if not _target_is_current(target, chunk, profile.key)
+        ]
+        smoke_test = _retrieval_smoke_test(target, source_chunks)
+        profile_matches = target.profile == profile
+        if failed or missing or not smoke_test["passed"] or not profile_matches:
+            failure_count = max(
+                failed,
+                len(missing),
+                int(not smoke_test["passed"]),
+                int(not profile_matches),
+            )
             sqlite.save_vector_migration(
                 migration_id,
                 profile.key,
@@ -129,8 +171,11 @@ async def apply_migration(manager: VectorIndexManager) -> dict[str, Any]:
                 "failed",
                 processed,
                 skipped,
-                max(failed, len(missing)),
-                f"{len(missing)} chunks are not current in the target collection.",
+                failure_count,
+                (
+                    f"{len(missing)} chunks are not current; "
+                    f"profile_matches={profile_matches}; smoke_test={smoke_test['passed']}."
+                ),
             )
             sqlite.set_vector_index_state(profile.key, "migration_required", manager.collection_name())
         else:
@@ -144,13 +189,60 @@ async def apply_migration(manager: VectorIndexManager) -> dict[str, Any]:
             "migration_id": migration_id,
             "processed_count": processed,
             "skipped_count": skipped,
-            "failed_count": failed,
+            "failed_count": max(
+                failed,
+                len(missing),
+                int(not smoke_test["passed"]),
+                int(not profile_matches),
+            ),
             "missing_count": len(missing),
-            "activated": not failed and not missing,
+            "profile_matches": profile_matches,
+            "smoke_test": smoke_test,
+            "activated": not failed and not missing and smoke_test["passed"] and profile_matches,
             "target_collection": target_name,
+            "database_backup": str(database_backup),
+            "chroma_backup": str(chroma_backup) if chroma_backup else None,
         }
     finally:
         sqlite.release_vector_index_lock(owner)
+
+
+def _migration_backups(database: Path, chroma_dir: Path) -> tuple[Path, Path | None]:
+    """Create recoverable SQLite and Chroma snapshots before v4 writes."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    database = database.resolve()
+    database_backup = database.with_name(
+        f"{database.name}.migration-backup-{timestamp}"
+    )
+    with sqlite3.connect(database) as source, sqlite3.connect(database_backup) as backup:
+        source.backup(backup)
+    chroma_dir = chroma_dir.resolve()
+    chroma_backup: Path | None = None
+    if chroma_dir.exists():
+        chroma_backup = chroma_dir.with_name(
+            f"{chroma_dir.name}.migration-backup-{timestamp}"
+        )
+        shutil.copytree(chroma_dir, chroma_backup)
+    return database_backup, chroma_backup
+
+
+def _retrieval_smoke_test(target: Any, chunks: list[PaperChunk]) -> dict[str, Any]:
+    """Verify one indexed chunk can be retrieved with its stored v4 vector."""
+    if not chunks:
+        return {"passed": True, "reason": "empty_source"}
+    probe = chunks[0]
+    entry = target.get_entry(probe.chunk_id, include_embedding=True)
+    if not entry or not entry.get("embedding"):
+        return {"passed": False, "reason": "probe_embedding_missing"}
+    results = target.search(
+        entry["embedding"],
+        doc_ids=[probe.doc_id],
+        top_k=min(5, len(chunks)),
+    )
+    return {
+        "passed": probe.chunk_id in {chunk.chunk_id for chunk in results},
+        "probe_chunk_id": probe.chunk_id,
+    }
 
 
 def verify(manager: VectorIndexManager) -> dict[str, Any]:

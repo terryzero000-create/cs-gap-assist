@@ -4,6 +4,26 @@ CS Gap Assist 是一个面向计算机科学论文的研究规划助手。它把
 
 稳定版本维护在 `main` 分支；功能开发请在独立分支完成，并通过 Pull Request 合并到 `main`。
 
+## Minimal competition build
+
+The current competition branch is `minimal-competition-build`. It includes:
+
+- Safe handling of legacy and malformed paper tags during SQLite, FTS, and LIKE searches.
+- Per-document synchronization for replacement uploads and paper deletion, with a post-lock replacement-state check.
+- Order-independent experiment deduplication based on canonical support-reference fields, without changing stored or displayed reference order.
+
+The deletion/replacement lock is process-local and is intended for the single-process competition deployment. Multi-worker or distributed deployments require database deletion state or a distributed lock.
+
+Validated with:
+
+```powershell
+python -m pytest backend/tests -q
+npm test --prefix frontend
+npm run typecheck --prefix frontend
+npm run build --prefix frontend
+npm run test:e2e --prefix frontend
+```
+
 ## 主要功能
 
 | 模块 | 用途 | 主要接口 |

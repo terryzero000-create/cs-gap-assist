@@ -3,6 +3,7 @@ import { DragEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   ApiClientError,
   createKnowledgeNote,
+  deleteKnowledgePaper,
   listKnowledgePapers,
   searchKnowledge,
   updateKnowledgePaper,
@@ -83,6 +84,7 @@ export function KnowledgeBasePanel({ onAskWithPaper }: KnowledgeBasePanelProps) 
   const [noteTags, setNoteTags] = useState('');
   const [relatedDocId, setRelatedDocId] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [paperPendingDeletion, setPaperPendingDeletion] = useState<PaperRecord | null>(null);
   const [status, setStatus] = useState('正在加载知识库...');
   const [isBusy, setIsBusy] = useState(false);
 
@@ -215,6 +217,32 @@ export function KnowledgeBasePanel({ onAskWithPaper }: KnowledgeBasePanelProps) 
     }
   }
 
+  async function handleDeletePaper(paper: PaperRecord): Promise<void> {
+    setIsBusy(true);
+    try {
+      const deleted = await deleteKnowledgePaper(paper.doc_id);
+      setPaperPendingDeletion(null);
+      if (relatedDocId === paper.doc_id) {
+        setRelatedDocId('');
+      }
+      await refreshPapers();
+      await runSearch();
+      const detail = deleted.deleted_chunk_count
+        ? `，同时移除 ${deleted.deleted_chunk_count} 个论文片段`
+        : '';
+      const unavailableRefCount = deleted.unavailable_gap_ref_count + deleted.unavailable_experiment_ref_count;
+      const evidenceDetail = unavailableRefCount
+        ? `；${unavailableRefCount} 条历史证据已标记为“来源已删除”`
+        : '';
+      const warning = deleted.warnings.length ? ` ${deleted.warnings.join(' ')}` : '';
+      setStatus(`已删除 ${paper.title}${detail}${evidenceDetail}。${warning}`);
+    } catch (error) {
+      setStatus(readableError(error, '论文删除失败。'));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   async function handleCreateNote(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const request: NoteCreateRequest = {
@@ -314,19 +342,38 @@ export function KnowledgeBasePanel({ onAskWithPaper }: KnowledgeBasePanelProps) 
             <h2>论文</h2>
             <span>{visibleResults.papers.length}</span>
           </div>
-          {visiblePapers.map((paper) => (
-            <article className="record-card" key={paper.doc_id}>
+          {visiblePapers.length === 0 ? (
+            <div className="paper-library-empty">
+              <span aria-hidden="true">空</span>
+              <div>
+                <strong>知识库里还没有论文</strong>
+                <p>从上方导入一篇真实论文，片段、标签和研究笔记会在这里汇合。</p>
+              </div>
+            </div>
+          ) : visiblePapers.map((paper) => {
+            const isConfirmingDelete = paperPendingDeletion?.doc_id === paper.doc_id;
+            return (
+            <article className={`record-card${isConfirmingDelete ? ' is-delete-confirming' : ''}`} key={paper.doc_id}>
               <div className="record-head">
                 <div>
                   <h3>{paper.title}</h3>
                   <p>{formatDate(paper.created_at)}</p>
                 </div>
                 <div className="record-actions">
-                  <button type="button" className="secondary-button" onClick={() => onAskWithPaper(paper.doc_id)}>
+                  <button type="button" className="secondary-button" disabled={isBusy} onClick={() => onAskWithPaper(paper.doc_id)}>
                     用于问答
                   </button>
-                  <button type="button" className="icon-button" onClick={() => void handleSavePaper(paper, !paper.is_favorite)}>
+                  <button type="button" className="icon-button" disabled={isBusy} onClick={() => void handleSavePaper(paper, !paper.is_favorite)}>
                     {paper.is_favorite ? '已收藏' : '收藏'}
+                  </button>
+                  <button
+                    aria-expanded={isConfirmingDelete}
+                    className="danger-button"
+                    disabled={isBusy}
+                    onClick={() => setPaperPendingDeletion(isConfirmingDelete ? null : paper)}
+                    type="button"
+                  >
+                    删除
                   </button>
                 </div>
               </div>
@@ -339,12 +386,28 @@ export function KnowledgeBasePanel({ onAskWithPaper }: KnowledgeBasePanelProps) 
                   onChange={(event) => setTagDrafts((current) => ({ ...current, [paper.doc_id]: event.target.value }))}
                   placeholder="标签一, 标签二"
                 />
-                <button type="button" onClick={() => void handleSavePaper(paper)}>
+                <button type="button" disabled={isBusy} onClick={() => void handleSavePaper(paper)}>
                   保存
                 </button>
               </div>
+              {isConfirmingDelete ? (
+                <div className="delete-confirmation" role="group" aria-label={`确认删除 ${paper.title}`}>
+                  <div>
+                    <strong>永久删除这篇论文？</strong>
+                    <p>论文片段、上传版本、向量和保存的 PDF 会一并移除；关联笔记会保留并解除关联。</p>
+                  </div>
+                  <div className="delete-confirmation-actions">
+                    <button className="secondary-button" disabled={isBusy} onClick={() => setPaperPendingDeletion(null)} type="button">
+                      取消
+                    </button>
+                    <button className="danger-button danger-button-solid" disabled={isBusy} onClick={() => void handleDeletePaper(paper)} type="button">
+                      {isBusy ? '正在删除' : '确认删除'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </article>
-          ))}
+          )})}
           </section>
 
           <section className="note-panel" aria-label="创建笔记">

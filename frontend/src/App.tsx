@@ -54,6 +54,7 @@ function mergeDocIds(current: string[], next: string[]): string[] {
 }
 
 const historyStorageKey = 'jiandu-reading-qa-history-v2';
+const requiresManualApiKey = import.meta.env.PROD;
 
 const modules: { key: ModuleKey; label: string; note: string; description: string }[] = [
   {
@@ -200,7 +201,7 @@ export function App() {
   }, [history]);
 
   useEffect(() => {
-    if (apiKey) {
+    if (!requiresManualApiKey || apiKey) {
       void loadSharedPapers();
     }
   }, [apiKey]);
@@ -419,7 +420,7 @@ export function App() {
     setApiKey('');
   }
 
-  if (!apiKey) {
+  if (requiresManualApiKey && !apiKey) {
     return <ApiKeySetup onSave={(value) => {
       setStoredApiKey(value);
       setApiKey(value.trim());
@@ -457,7 +458,9 @@ export function App() {
         <div className="rail-status">
           <span className="status-dot" aria-hidden="true" />
           <span><strong>Local-first</strong> 本地知识工作台</span>
-          <button className="secondary-button" type="button" onClick={clearApiKey}>更换 API Key</button>
+          {requiresManualApiKey ? (
+            <button className="secondary-button" type="button" onClick={clearApiKey}>更换 API Key</button>
+          ) : null}
         </div>
       </header>
 

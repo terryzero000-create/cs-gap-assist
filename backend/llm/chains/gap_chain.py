@@ -5,7 +5,7 @@ from typing import Any
 from backend.core.config import Settings
 from backend.llm.llm_service import ChatProviderUnavailable, get_chat_provider
 from backend.models.schemas import EvidenceRef, GapAnalysisRequest, GapAnalysisResponse, GapItem
-from backend.repositories.sqlite_store import SQLiteStore
+from backend.repositories.sqlite_store import get_sqlite_store
 from backend.services.arxiv_search import ArxivSearchClient
 from backend.services.evidence import (
     evidence_status,
@@ -18,7 +18,7 @@ from backend.services.evidence_retriever import EvidenceRetriever
 
 async def analyze_research_gaps(request: GapAnalysisRequest, settings: Settings) -> GapAnalysisResponse:
     """Analyze research gaps from local papers and external literature evidence."""
-    store = SQLiteStore(settings.sqlite_path)
+    store = get_sqlite_store(settings.sqlite_path)
     local = await EvidenceRetriever(settings, store).retrieve(request.topic, request.doc_ids, top_k=5)
     arxiv_papers, arxiv_warnings = await ArxivSearchClient(
         base_url=settings.arxiv_base_url,

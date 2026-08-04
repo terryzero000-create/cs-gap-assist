@@ -6,7 +6,7 @@ from backend.core.config import get_settings
 from backend.core.errors import ApiError
 from backend.models.schemas import PaperChunk, PaperListResponse, PaperUploadResponse
 from backend.rag.embedder import get_embedding_provider
-from backend.repositories.sqlite_store import SQLiteStore
+from backend.repositories.sqlite_store import get_sqlite_store
 from backend.services.pdf_parser import PdfParser, PdfValidationError
 from backend.services.vector_index import get_vector_index_manager
 
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/papers", tags=["papers"])
 async def list_papers() -> PaperListResponse:
     """Return stored papers available for follow-up analysis."""
     settings = get_settings()
-    return PaperListResponse(papers=SQLiteStore(settings.sqlite_path).list_papers())
+    return PaperListResponse(papers=get_sqlite_store(settings.sqlite_path).list_papers())
 
 
 @router.post("/upload", response_model=PaperUploadResponse)
@@ -103,7 +103,7 @@ async def upload_paper(response: Response, file: UploadFile = File(...)) -> Pape
             409,
             error_code="EMBEDDING_PROFILE_MISMATCH",
         )
-    SQLiteStore(settings.sqlite_path).add_paper(doc_id, file.filename, chunks)
+    get_sqlite_store(settings.sqlite_path).add_paper(doc_id, file.filename, chunks)
     manager.add_chunks(chunks, result.vectors)
     response.headers["Deprecation"] = "true"
     response.headers["Sunset"] = "Wed, 30 Sep 2026 00:00:00 GMT"

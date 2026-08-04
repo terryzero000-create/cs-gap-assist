@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     max_pdf_pages: int = 500
     legacy_sync_max_pdf_bytes: int = 10 * 1024 * 1024
     legacy_sync_max_pdf_pages: int = 100
+    ocr_mode: Literal["disabled", "auto", "required"] = "auto"
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     default_chat_provider: Literal["deepseek", "openai", "mock"] = "deepseek"
@@ -45,7 +46,7 @@ class Settings(BaseSettings):
     arxiv_user_agent: str = "CS-Gap-Assist/0.1 (literature-research-client)"
     arxiv_min_interval_seconds: float = 3.0
     arxiv_cache_ttl_seconds: float = 300.0
-    external_search_timeout_seconds: float = 3.0
+    external_search_timeout_seconds: float = 30.0
     external_network_enabled: bool = True
     rag_min_semantic_score: float = 0.35
     rag_min_lexical_score: float = 0.05

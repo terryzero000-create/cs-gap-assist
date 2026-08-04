@@ -24,11 +24,14 @@ if not _LIVE_SMOKE:
             "XFYUN_SPARK_APP_ID": "",
             "XFYUN_SPARK_API_KEY": "",
             "XFYUN_SPARK_API_SECRET": "",
+            "OCR_MODE": "auto",
         }
     )
 
 from backend.core.config import get_settings
 from backend.rag.vector_store import clear_vector_store_cache
+from backend.repositories.sqlite_store import get_sqlite_store
+from backend.services.pdf_parser import ocr_capability
 from backend.services.vector_index import clear_vector_index_manager_cache
 
 
@@ -57,10 +60,15 @@ def isolated_runtime(tmp_path, monkeypatch) -> Iterator[None]:
     monkeypatch.setenv("XFYUN_SPARK_APP_ID", "")
     monkeypatch.setenv("XFYUN_SPARK_API_KEY", "")
     monkeypatch.setenv("XFYUN_SPARK_API_SECRET", "")
+    monkeypatch.setenv("OCR_MODE", "auto")
     get_settings.cache_clear()
+    get_sqlite_store.cache_clear()
+    ocr_capability.cache_clear()
     clear_vector_store_cache()
     clear_vector_index_manager_cache()
     yield
     get_settings.cache_clear()
+    get_sqlite_store.cache_clear()
+    ocr_capability.cache_clear()
     clear_vector_store_cache()
     clear_vector_index_manager_cache()

@@ -6,7 +6,7 @@ from fastapi import APIRouter, File, Form, Header, UploadFile, status
 from backend.core.config import get_settings
 from backend.core.errors import ApiError
 from backend.models.schemas import PaperUploadTaskResponse
-from backend.repositories.sqlite_store import SQLiteStore
+from backend.repositories.sqlite_store import get_sqlite_store
 from backend.services.paper_ingestion import (
     get_ingestion_worker,
     persist_upload_file,
@@ -35,7 +35,7 @@ async def create_paper_upload(
             415,
             error_code="INVALID_PDF_CONTENT_TYPE",
         )
-    store = SQLiteStore(settings.sqlite_path)
+    store = get_sqlite_store(settings.sqlite_path)
     existing_paper = store.get_paper(replace_doc_id) if replace_doc_id else None
     if replace_doc_id and (
         existing_paper is None
@@ -88,7 +88,7 @@ async def create_paper_upload(
 async def get_paper_upload(upload_id: str) -> PaperUploadTaskResponse:
     """Return the durable state of one ingestion task."""
     settings = get_settings()
-    record = SQLiteStore(settings.sqlite_path).get_upload(upload_id)
+    record = get_sqlite_store(settings.sqlite_path).get_upload(upload_id)
     if record is None:
         raise ApiError("Upload not found.", 404, error_code="UPLOAD_NOT_FOUND")
     return upload_response(record, settings.api_prefix)
@@ -98,7 +98,7 @@ async def get_paper_upload(upload_id: str) -> PaperUploadTaskResponse:
 async def retry_paper_upload(upload_id: str) -> PaperUploadTaskResponse:
     """Retry a failed upload only when the stored error is retryable."""
     settings = get_settings()
-    store = SQLiteStore(settings.sqlite_path)
+    store = get_sqlite_store(settings.sqlite_path)
     try:
         store.reset_upload_for_retry(upload_id)
     except KeyError as exc:

@@ -1,5 +1,4 @@
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { afterEach, expect, test, vi } from 'vitest';
 
 import { App } from './App';
@@ -8,7 +7,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test('requires an API key and stores it only in sessionStorage', async () => {
+test('opens the local development workspace without an API key prompt', async () => {
   const fetchMock = vi.fn().mockResolvedValue(
     new Response(JSON.stringify({ papers: [] }), {
       status: 200,
@@ -16,18 +15,16 @@ test('requires an API key and stores it only in sessionStorage', async () => {
     }),
   );
   vi.stubGlobal('fetch', fetchMock);
-  const user = userEvent.setup();
 
   render(<App />);
-  expect(screen.getByRole('heading', { name: '连接本地研究工作台' })).toBeInTheDocument();
-  await user.type(screen.getByLabelText('API Key'), 'test-token');
-  await user.click(screen.getByRole('button', { name: '进入工作台' }));
 
-  expect(window.sessionStorage.getItem('cs-gap-assist-api-key')).toBe('test-token');
+  expect(screen.queryByRole('heading', { name: '连接本地研究工作台' })).not.toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: /计算机论文研读/ })).toBeInTheDocument();
+  expect(window.sessionStorage.getItem('cs-gap-assist-api-key')).toBeNull();
   expect(window.localStorage.getItem('cs-gap-assist-api-key')).toBeNull();
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   const init = fetchMock.mock.calls[0][1] as RequestInit;
-  expect(new Headers(init.headers).get('Authorization')).toBe('Bearer test-token');
+  expect(new Headers(init.headers).get('Authorization')).toBeNull();
 });
 
 test('renders a structured backend error code without matching English text', async () => {

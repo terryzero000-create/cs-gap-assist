@@ -131,7 +131,7 @@ class OpenAlexCitationClient:
         """Fetch works that cite a given OpenAlex work."""
         params = {
             "filter": f"cites:{paper_id}",
-            "per-page": str(limit),
+            "per_page": str(limit),
             "sort": "cited_by_count:desc",
             "select": "id,display_name,publication_year,cited_by_count",
             "api_key": self.api_key or "",
@@ -141,7 +141,11 @@ class OpenAlexCitationClient:
         except Exception:
             return []
         data = response.json()
-        return [self._paper_from_item(item) for item in data.get("results", []) if self._is_work_item(item)]
+        return [
+            self._paper_from_item(item)
+            for item in data.get("results", [])
+            if self._is_work_item(item)
+        ][:limit]
 
     def _paper_from_item(self, item: dict[str, object]) -> ExternalCitationPaper:
         """Convert an OpenAlex work item into citation graph metadata."""

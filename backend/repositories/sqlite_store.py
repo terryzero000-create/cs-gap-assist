@@ -4,6 +4,7 @@ import os
 import re
 import sqlite3
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 from backend.models.schemas import (
@@ -359,6 +360,176 @@ class SQLiteStore:
             row = conn.execute("SELECT * FROM papers WHERE doc_id = ?", (doc_id,)).fetchone()
         return self._paper_from_row(row) if row else None
 
+    def paper_deletion_manifest(self, doc_id: str) -> dict[str, object] | None:
+        """Return resources belonging to a paper after rejecting active ingestion."""
+        with self._connect() as conn:
+            paper = conn.execute(
+                "SELECT doc_id FROM papers WHERE doc_id = ?",
+                (doc_id,),
+            ).fetchone()
+            if paper is None:
+                return None
+            active_upload = conn.execute(
+                """
+                SELECT upload_id FROM paper_uploads
+                WHERE doc_id = ? AND status NOT IN ('ready', 'failed')
+                LIMIT 1
+                """,
+                (doc_id,),
+            ).fetchone()
+            if active_upload is not None:
+                raise ValueError("PAPER_INGESTION_IN_PROGRESS")
+            chunk_ids = [
+                str(row["chunk_id"])
+                for row in conn.execute(
+                    "SELECT chunk_id FROM chunks WHERE doc_id = ?",
+                    (doc_id,),
+                ).fetchall()
+            ]
+            source_paths = [
+                str(row["source_path"])
+                for row in conn.execute(
+                    "SELECT source_path FROM paper_revisions WHERE doc_id = ?",
+                    (doc_id,),
+                ).fetchall()
+            ]
+            vector_collections: list[str] = []
+            if chunk_ids:
+                placeholders = ",".join("?" for _ in chunk_ids)
+                vector_collections = [
+                    str(row["collection_name"])
+                    for row in conn.execute(
+                        f"""
+                        SELECT DISTINCT collection_name
+                        FROM vector_index_entries
+                        WHERE chunk_id IN ({placeholders})
+                        """,
+                        chunk_ids,
+                    ).fetchall()
+                ]
+        return {
+            "doc_id": doc_id,
+            "chunk_ids": chunk_ids,
+            "source_paths": source_paths,
+            "vector_collections": vector_collections,
+        }
+
+    def delete_paper_records(self, doc_id: str) -> dict[str, int]:
+        """Atomically delete one paper and its durable database records."""
+        with self._connect() as conn:
+            paper = conn.execute(
+                "SELECT doc_id FROM papers WHERE doc_id = ?",
+                (doc_id,),
+            ).fetchone()
+            if paper is None:
+                raise KeyError(f"Paper not found: {doc_id}")
+            active_upload = conn.execute(
+                """
+                SELECT upload_id FROM paper_uploads
+                WHERE doc_id = ? AND status NOT IN ('ready', 'failed')
+                LIMIT 1
+                """,
+                (doc_id,),
+            ).fetchone()
+            if active_upload is not None:
+                raise ValueError("PAPER_INGESTION_IN_PROGRESS")
+            chunk_ids = [
+                str(row["chunk_id"])
+                for row in conn.execute(
+                    "SELECT chunk_id FROM chunks WHERE doc_id = ?",
+                    (doc_id,),
+                ).fetchall()
+            ]
+            revision_count = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS count FROM paper_revisions WHERE doc_id = ?",
+                    (doc_id,),
+                ).fetchone()["count"]
+            )
+            upload_count = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS count FROM paper_uploads WHERE doc_id = ?",
+                    (doc_id,),
+                ).fetchone()["count"]
+            )
+            detached_notes = conn.execute(
+                "UPDATE notes SET related_doc_id = NULL WHERE related_doc_id = ?",
+                (doc_id,),
+            ).rowcount
+            unavailable_gap_refs = self._mark_deleted_evidence_refs(
+                conn,
+                table="gaps",
+                id_column="gap_id",
+                refs_column="evidence_refs",
+                doc_id=doc_id,
+            )
+            unavailable_experiment_refs = self._mark_deleted_evidence_refs(
+                conn,
+                table="experiments",
+                id_column="experiment_id",
+                refs_column="support_refs",
+                doc_id=doc_id,
+            )
+            if chunk_ids:
+                placeholders = ",".join("?" for _ in chunk_ids)
+                conn.execute(
+                    f"DELETE FROM vector_index_entries WHERE chunk_id IN ({placeholders})",
+                    chunk_ids,
+                )
+            conn.execute("DELETE FROM paper_uploads WHERE doc_id = ?", (doc_id,))
+            conn.execute("DELETE FROM paper_revisions WHERE doc_id = ?", (doc_id,))
+            conn.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
+            conn.execute("DELETE FROM papers WHERE doc_id = ?", (doc_id,))
+        return {
+            "deleted_chunk_count": len(chunk_ids),
+            "deleted_revision_count": revision_count,
+            "deleted_upload_count": upload_count,
+            "detached_note_count": max(detached_notes, 0),
+            "unavailable_gap_ref_count": unavailable_gap_refs,
+            "unavailable_experiment_ref_count": unavailable_experiment_refs,
+        }
+
+    @staticmethod
+    def _mark_deleted_evidence_refs(
+        conn: sqlite3.Connection,
+        *,
+        table: str,
+        id_column: str,
+        refs_column: str,
+        doc_id: str,
+    ) -> int:
+        """Retain history while making references to a deleted local paper unusable."""
+        marked = 0
+        rows = conn.execute(
+            f"SELECT {id_column}, {refs_column} FROM {table}"
+        ).fetchall()
+        for row in rows:
+            try:
+                refs = json.loads(row[refs_column])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(refs, list):
+                continue
+            changed = False
+            for ref in refs:
+                if not isinstance(ref, dict):
+                    continue
+                if (
+                    ref.get("source") == "local"
+                    and ref.get("doc_id") == doc_id
+                    and ref.get("is_available", True)
+                ):
+                    ref["is_available"] = False
+                    ref["unavailable_reason"] = "source_deleted"
+                    marked += 1
+                    changed = True
+            if changed:
+                conn.execute(
+                    f"UPDATE {table} SET {refs_column} = ? WHERE {id_column} = ?",
+                    (json.dumps(refs), row[id_column]),
+                )
+        return marked
+
     def list_chunks(self, doc_ids: list[str] | None = None) -> list[PaperChunk]:
         """Return stored paper chunks, optionally filtered by document ids."""
         conditions = [
@@ -384,7 +555,49 @@ class SQLiteStore:
 
     def count_chunks(self) -> int:
         """Return the number of SQLite source chunks."""
-        return len(self.list_chunks())
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS chunk_count
+                FROM chunks c
+                JOIN papers p ON p.doc_id = c.doc_id
+                WHERE (c.revision_id IS NULL OR c.revision_id = p.active_revision_id)
+                  AND p.ingestion_status = 'ready'
+                """
+            ).fetchone()
+        return int(row["chunk_count"]) if row else 0
+
+    def active_chunk_ids(self) -> set[str]:
+        """Return active source chunk IDs without loading stored paper text."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT c.chunk_id
+                FROM chunks c
+                JOIN papers p ON p.doc_id = c.doc_id
+                WHERE (c.revision_id IS NULL OR c.revision_id = p.active_revision_id)
+                  AND p.ingestion_status = 'ready'
+                """
+            ).fetchall()
+        return {str(row["chunk_id"]) for row in rows}
+
+    def ping(self) -> None:
+        """Verify that the configured SQLite database accepts a lightweight query."""
+        with self._connect() as conn:
+            conn.execute("SELECT 1").fetchone()
+
+    def count_reupload_required(self) -> int:
+        """Return the number of legacy papers waiting for a trusted re-upload."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS paper_count
+                FROM papers
+                WHERE ingestion_status = 'reupload_required'
+                   OR reupload_required = 1
+                """
+            ).fetchone()
+        return int(row["paper_count"]) if row else 0
 
     def search_chunks_fts(
         self,
@@ -422,6 +635,74 @@ class SQLiteStore:
             )
             for row in rows
         ]
+
+    def search_knowledge_chunks(
+        self,
+        query: str,
+        *,
+        tag: str | None = None,
+        favorites_only: bool = False,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[PaperChunk]:
+        """Search active chunks in SQLite without materializing the full corpus."""
+        safe_limit = max(1, min(limit, 50))
+        safe_offset = max(0, offset)
+        conditions = [
+            "(c.revision_id IS NULL OR c.revision_id = p.active_revision_id)",
+            "p.ingestion_status = 'ready'",
+        ]
+        filter_params: list[object] = []
+        if tag:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM json_each(p.tags) WHERE json_each.value = ?)"
+            )
+            filter_params.append(tag)
+        if favorites_only:
+            conditions.append("p.is_favorite = 1")
+        where = " AND ".join(conditions)
+        normalized = query.strip()
+        match_query = self._fts_query(normalized)
+        if match_query:
+            try:
+                with self._connect() as conn:
+                    rows = conn.execute(
+                        f"""
+                        SELECT c.*, bm25(chunks_fts) AS bm25_rank
+                        FROM chunks_fts
+                        JOIN chunks c ON c.chunk_id = chunks_fts.chunk_id
+                        JOIN papers p ON p.doc_id = c.doc_id
+                        WHERE chunks_fts MATCH ? AND {where}
+                        ORDER BY bm25_rank, c.doc_id, c.ordinal, c.page
+                        LIMIT ? OFFSET ?
+                        """,
+                        [match_query, *filter_params, safe_limit, safe_offset],
+                    ).fetchall()
+                return [
+                    self._chunk_from_row(row).model_copy(
+                        update={"score": 1.0 / (1.0 + abs(float(row["bm25_rank"])))}
+                    )
+                    for row in rows
+                ]
+            except sqlite3.OperationalError:
+                # A build without usable FTS5 still gets a bounded lexical path.
+                pass
+        if normalized:
+            conditions.append("LOWER(c.text) LIKE ?")
+            filter_params.append(f"%{normalized.lower()}%")
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT c.*
+                FROM chunks c
+                JOIN papers p ON p.doc_id = c.doc_id
+                WHERE {' AND '.join(conditions)}
+                ORDER BY p.created_at DESC, c.doc_id, c.ordinal, c.page
+                LIMIT ? OFFSET ?
+                """,
+                [*filter_params, safe_limit, safe_offset],
+            ).fetchall()
+        return [self._chunk_from_row(row) for row in rows]
 
     def create_upload(
         self,
@@ -625,6 +906,45 @@ class SQLiteStore:
             if active:
                 raise ValueError("Cannot delete active revision chunks.")
             conn.execute("DELETE FROM chunks WHERE revision_id = ?", (revision_id,))
+
+    def failed_revision_cleanup_manifests(
+        self,
+        doc_id: str,
+        *,
+        exclude_revision_id: str,
+    ) -> list[dict[str, object]]:
+        """Return inactive failed revisions that a successful replacement may reclaim."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.revision_id, r.source_path
+                FROM paper_revisions r
+                LEFT JOIN papers p ON p.doc_id = r.doc_id
+                WHERE r.doc_id = ?
+                  AND r.revision_id != ?
+                  AND r.status = 'failed'
+                  AND (p.active_revision_id IS NULL OR p.active_revision_id != r.revision_id)
+                ORDER BY r.created_at
+                """,
+                (doc_id, exclude_revision_id),
+            ).fetchall()
+            manifests: list[dict[str, object]] = []
+            for row in rows:
+                chunk_ids = [
+                    str(chunk["chunk_id"])
+                    for chunk in conn.execute(
+                        "SELECT chunk_id FROM chunks WHERE revision_id = ? ORDER BY ordinal",
+                        (row["revision_id"],),
+                    ).fetchall()
+                ]
+                manifests.append(
+                    {
+                        "revision_id": str(row["revision_id"]),
+                        "source_path": str(row["source_path"]),
+                        "chunk_ids": chunk_ids,
+                    }
+                )
+        return manifests
 
     def activate_upload(self, upload_id: str) -> str | None:
         """Atomically switch a fully indexed revision and return the previous revision."""
@@ -956,13 +1276,27 @@ class SQLiteStore:
         ]
 
     def save_experiment(self, experiment: ExperimentPlan) -> ExperimentPlan:
-        """Persist an experiment only when every support reference is trusted."""
+        """Persist a trusted experiment once, reusing an identical saved plan."""
         if experiment.trust_status not in {"verified", "local_only"}:
             raise ValueError("Only verified or local-only experiments may be persisted.")
         trusted_refs = self.trusted_evidence_refs(experiment.support_refs)
         if not trusted_refs or len(trusted_refs) != len(experiment.support_refs):
             raise ValueError("Experiment support evidence could not be verified.")
+        normalized = experiment.model_copy(
+            update={
+                "support_papers": [ref.id for ref in trusted_refs],
+                "support_refs": trusted_refs,
+            }
+        )
         with self._connect() as conn:
+            existing_rows = conn.execute(
+                "SELECT * FROM experiments WHERE gap_id = ?",
+                (experiment.gap_id,),
+            ).fetchall()
+            for row in existing_rows:
+                existing = self._experiment_from_row(row)
+                if self._experiment_signature(existing) == self._experiment_signature(normalized):
+                    return existing
             conn.execute(
                 """
                 INSERT OR REPLACE INTO experiments
@@ -971,20 +1305,20 @@ class SQLiteStore:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    experiment.experiment_id,
-                    experiment.gap_id,
-                    experiment.objective,
-                    json.dumps(experiment.datasets),
-                    json.dumps(experiment.metrics),
-                    json.dumps(experiment.baselines),
-                    json.dumps(experiment.steps),
-                    json.dumps(experiment.risks),
+                    normalized.experiment_id,
+                    normalized.gap_id,
+                    normalized.objective,
+                    json.dumps(normalized.datasets),
+                    json.dumps(normalized.metrics),
+                    json.dumps(normalized.baselines),
+                    json.dumps(normalized.steps),
+                    json.dumps(normalized.risks),
                     json.dumps([ref.id for ref in trusted_refs]),
                     json.dumps([ref.model_dump() for ref in trusted_refs]),
-                    experiment.trust_status,
+                    normalized.trust_status,
                 ),
             )
-        return experiment
+        return normalized
 
     def list_experiments(
         self,
@@ -1002,22 +1336,37 @@ class SQLiteStore:
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         with self._connect() as conn:
             rows = conn.execute(f"SELECT * FROM experiments{where}", params).fetchall()
-        return [
-            ExperimentPlan(
-                experiment_id=row["experiment_id"],
-                gap_id=row["gap_id"],
-                objective=row["objective"],
-                datasets=json.loads(row["datasets"]),
-                metrics=json.loads(row["metrics"]),
-                baselines=json.loads(row["baselines"]),
-                steps=json.loads(row["steps"]),
-                risks=json.loads(row["risks"]),
-                support_papers=json.loads(row["support_papers"]),
-                support_refs=[EvidenceRef.model_validate(item) for item in json.loads(row["support_refs"])],
-                trust_status=row["trust_status"],
-            )
-            for row in rows
-        ]
+        return [self._experiment_from_row(row) for row in rows]
+
+    @staticmethod
+    def _experiment_from_row(row: sqlite3.Row) -> ExperimentPlan:
+        return ExperimentPlan(
+            experiment_id=row["experiment_id"],
+            gap_id=row["gap_id"],
+            objective=row["objective"],
+            datasets=json.loads(row["datasets"]),
+            metrics=json.loads(row["metrics"]),
+            baselines=json.loads(row["baselines"]),
+            steps=json.loads(row["steps"]),
+            risks=json.loads(row["risks"]),
+            support_papers=json.loads(row["support_papers"]),
+            support_refs=[EvidenceRef.model_validate(item) for item in json.loads(row["support_refs"])],
+            trust_status=row["trust_status"],
+        )
+
+    @staticmethod
+    def _experiment_signature(experiment: ExperimentPlan) -> tuple[object, ...]:
+        return (
+            experiment.gap_id,
+            experiment.objective,
+            tuple(experiment.datasets),
+            tuple(experiment.metrics),
+            tuple(experiment.baselines),
+            tuple(experiment.steps),
+            tuple(experiment.risks),
+            tuple(ref.model_dump_json() for ref in experiment.support_refs),
+            experiment.trust_status,
+        )
 
     def trusted_evidence_refs(self, refs: list[EvidenceRef]) -> list[EvidenceRef]:
         """Revalidate structured references immediately before persistence or reuse."""
@@ -1025,6 +1374,8 @@ class SQLiteStore:
         seen: set[str] = set()
         for ref in refs:
             if ref.id in seen:
+                continue
+            if not ref.is_available:
                 continue
             if ref.source == "local":
                 if not ref.doc_id or not ref.chunk_id or ref.page is None:
@@ -1162,3 +1513,9 @@ class SQLiteStore:
             content_hash=row["content_hash"],
             injection_flagged=bool(row["injection_flagged"]),
         )
+
+
+@lru_cache(maxsize=32)
+def get_sqlite_store(path: Path) -> SQLiteStore:
+    """Return one process-local repository per resolved database path."""
+    return SQLiteStore(path.resolve())

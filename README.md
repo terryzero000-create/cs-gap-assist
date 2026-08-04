@@ -52,7 +52,7 @@ macOS/Linux:
 cp .env.example .env
 ```
 
-先在 `.env` 设置一个只供本机使用的 `APP_API_KEY`。前端首次打开时会要求输入该 token，并且只写入当前标签页的 `sessionStorage`。缺少真实模型凭据时，生产/开发环境不会伪造可信研究结论；`mock` 仅限 `APP_ENV=test` 或显式 `ALLOW_SYNTHETIC_MODE=true`。
+先在 `.env` 设置一个只供本机使用的 `APP_API_KEY`。本地开发服务器会在反向代理层自动附加该 token，浏览器无需手动输入；生产构建仍会要求显式提供 token，并且只写入当前标签页的 `sessionStorage`。缺少真实模型凭据时，生产/开发环境不会伪造可信研究结论；`mock` 仅限 `APP_ENV=test` 或显式 `ALLOW_SYNTHETIC_MODE=true`。
 
 ### 2. 安装依赖
 
@@ -67,6 +67,11 @@ python -m pip install -e ".[dev,rag,xfyun]"
 ```powershell
 python -m pip install -e ".[pdf-advanced,rerank]"
 ```
+
+OCR 还需要系统安装 Tesseract，并提供 `chi_sim` 与 `eng` 语言包。`OCR_MODE`
+支持 `disabled`、`auto`（默认）和 `required`：`auto` 会在 OCR 环境不可用时
+跳过混合文档中的低文字页面并返回 warning；整篇扫描件仍会返回结构化
+`OCR_REQUIRED`，避免空内容入库。
 
 前端：
 
@@ -230,12 +235,9 @@ python -m backend.scripts.migrate_vector_index --verify-only
 
 迁移先输出 profile、稳定 chunk ID、内容哈希清单；apply 前自动备份 SQLite 与 Chroma。只有 profile、内容哈希、missing 和检索 smoke test 都通过才切换。任何 `reupload_required` 论文都会阻止迁移激活。成功后仍保留 legacy collection，不自动删除旧向量。
 
-经审批的旧数据隔离命令（默认仅 dry-run，严格校验 14/21/6/4 计数）：
-
-```powershell
-python -m backend.scripts.harden_legacy_data
-python -m backend.scripts.harden_legacy_data --apply
-```
+旧 legacy 数据隔离已在当前本地数据库完成。不要在当前库直接运行
+`harden_legacy_data --apply`；如需处理新的 legacy 数据，必须先做只读审计并创建
+独立备份，再按实际计数审批执行。
 
 RAG 评测需要在保留论文重传后人工标注 36–50 条问题。模板和 release gate 位于 `backend/evals/`：
 
@@ -259,9 +261,9 @@ frontend/
   src/                 React app, typed API client, components
   vite.config.ts       dev server and API proxy
 docs/
-  PROJECT_STATUS.md    project status and module map
-  BRANCH_HANDOFF.md    branch handoff notes
-  LOCAL_SETUP.md       local setup notes
+  competition-ready-100-plan.md       competition release plan and acceptance gates
+  demo-checklist.md                   12–15 minute demo runbook
+  live-validation-t3-t4-2026-08-03.md real-provider validation record
 ```
 
 ## 当前限制
@@ -269,12 +271,15 @@ docs/
 - 这是绑定 `127.0.0.1` 的本机单用户部署，不包含多用户账号体系。
 - 真实 DeepSeek、讯飞 Spark Embedding、OpenAlex smoke test 需要凭据，只能手动运行，不进入默认离线 CI。
 - OCR 与 cross-encoder 是可选增强；OCR 缺失时扫描件返回 retryable `OCR_REQUIRED`，不会成功入库为空论文。
-- 保留的 4 篇旧论文在原始 PDF 重传前保持 `reupload_required`，其 legacy chunks 和 vectors 不进入正常检索。
+- 比赛版基线、剩余验收项和交付要求以
+  [`docs/competition-ready-100-plan.md`](docs/competition-ready-100-plan.md) 为准。
 - 完美数学公式识别不在本轮范围；无法确认的公式不做猜测。
 - 复现实验室只生成辅助报告和模板，不执行代码，不承诺复现论文指标。
 
 ## 更多文档
 
-- [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)
-- [`docs/BRANCH_HANDOFF.md`](docs/BRANCH_HANDOFF.md)
-- [`docs/LOCAL_SETUP.md`](docs/LOCAL_SETUP.md)
+- [`docs/competition-ready-100-plan.md`](docs/competition-ready-100-plan.md)：比赛版 100% 收尾与验收计划
+- [`docs/demo-checklist.md`](docs/demo-checklist.md)：12–15 分钟演示预检清单
+- [`docs/live-validation-t3-t4-2026-08-03.md`](docs/live-validation-t3-t4-2026-08-03.md)：真实上传与外部服务验证记录
+- [`docs/competition-backup-recovery.md`](docs/competition-backup-recovery.md)：比赛版备份、恢复和只读核验记录
+- [`docs/demo-fallback.png`](docs/demo-fallback.png)：本地基线演示截图

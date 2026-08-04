@@ -58,7 +58,9 @@ export function ExperimentPlanCard({ plan }: ExperimentPlanCardProps) {
         {plan.support_refs.length > 0
           ? plan.support_refs.map((reference) => (
             <span key={reference.id}>
-              {reference.canonical_url.startsWith('http') ? (
+              {reference.is_available === false ? (
+                <span className="evidence-unavailable">来源已删除 · {reference.title}</span>
+              ) : reference.canonical_url.startsWith('http') ? (
                 <a href={reference.canonical_url} rel="noreferrer" target="_blank">{reference.title}</a>
               ) : reference.title}
             </span>

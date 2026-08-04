@@ -5,7 +5,7 @@ from typing import Any
 from backend.core.config import Settings
 from backend.llm.llm_service import ChatProviderUnavailable, get_chat_provider
 from backend.models.schemas import EvidenceRef, ExperimentPlan, ExperimentSuggestRequest, ExperimentSuggestResponse, TrustStatus
-from backend.repositories.sqlite_store import SQLiteStore
+from backend.repositories.sqlite_store import get_sqlite_store
 from backend.services.arxiv_search import ArxivSearchClient
 from backend.services.evidence import (
     evidence_status,
@@ -18,7 +18,7 @@ from backend.services.evidence_retriever import EvidenceRetriever
 async def suggest_experiments(request: ExperimentSuggestRequest, settings: Settings) -> ExperimentSuggestResponse:
     """Generate literature-supported experiment plans for a research gap."""
     query = request.topic or request.gap_id
-    store = SQLiteStore(settings.sqlite_path)
+    store = get_sqlite_store(settings.sqlite_path)
     local_doc_ids = list(
         dict.fromkeys(ref.doc_id for ref in request.evidence_refs if ref.source == "local" and ref.doc_id)
     )

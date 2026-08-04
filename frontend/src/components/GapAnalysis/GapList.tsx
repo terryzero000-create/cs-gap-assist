@@ -24,7 +24,9 @@ export function GapList({ gaps }: GapListProps) {
               {gap.evidence_refs.length > 0
                 ? gap.evidence_refs.map((reference) => (
                   <li key={reference.id}>
-                    {reference.canonical_url.startsWith('http') ? (
+                    {reference.is_available === false ? (
+                      <span className="evidence-unavailable">来源已删除 · {reference.title}</span>
+                    ) : reference.canonical_url.startsWith('http') ? (
                       <a href={reference.canonical_url} rel="noreferrer" target="_blank">{reference.title}</a>
                     ) : reference.title}
                     <small> · {reference.id}</small>

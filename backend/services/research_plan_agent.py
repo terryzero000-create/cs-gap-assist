@@ -3,6 +3,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from backend.core.config import Settings
+from backend.core.sanitize import safe_exception_message
 from backend.llm.chains.experiment_chain import suggest_experiments
 from backend.llm.chains.gap_chain import analyze_research_gaps
 from backend.models.schemas import (
@@ -22,6 +23,7 @@ from backend.models.schemas import (
 from backend.repositories.sqlite_store import SQLiteStore
 from backend.services.arxiv_search import ArxivSearchClient
 from backend.services.evidence_retriever import EvidenceRetriever
+from backend.services.experiment_persistence import persist_trusted_experiments
 
 
 MAX_STEPS = 10
@@ -172,18 +174,27 @@ class ResearchPlanAgentService:
 
     async def experiment_suggestion_tool(self, state: ResearchPlanState) -> str:
         async def suggest_for_gap(gap: GapItem):
-            topic = f"{gap.title}. {gap.description}"
-            if state.request.experiment_result:
-                topic = f"{topic}\nCurrent experiment result: {state.request.experiment_result}"
-            return await suggest_experiments(
-                ExperimentSuggestRequest(
-                    gap_id=gap.gap_id,
-                    topic=topic,
-                    evidence_refs=gap.evidence_refs,
-                    model_config=state.request.runtime_model_config,
-                ),
-                self.settings,
-            )
+            try:
+                topic = f"{gap.title}. {gap.description}"
+                if state.request.experiment_result:
+                    topic = f"{topic}\nCurrent experiment result: {state.request.experiment_result}"
+                response = await suggest_experiments(
+                    ExperimentSuggestRequest(
+                        gap_id=gap.gap_id,
+                        topic=topic,
+                        evidence_refs=gap.evidence_refs,
+                        model_config=state.request.runtime_model_config,
+                    ),
+                    self.settings,
+                )
+                _, persistence_warnings = persist_trusted_experiments(
+                    self.store,
+                    response,
+                )
+                response.warnings.extend(persistence_warnings)
+                return gap, response, None
+            except Exception as exc:
+                return gap, None, safe_exception_message(exc)
 
         tasks: list[asyncio.Task] = []
         async with asyncio.TaskGroup() as group:
@@ -192,7 +203,12 @@ class ResearchPlanAgentService:
 
         plans: list[ExperimentPlan] = []
         for task in tasks:
-            response = task.result()
+            gap, response, error = task.result()
+            if response is None:
+                state.warnings.append(
+                    f"Experiment suggestion failed for gap {gap.gap_id}: {error or 'unknown error'}"
+                )
+                continue
             plans.extend(response.experiments[:1])
             state.evidence_status = self._stronger_status(state.evidence_status, response.evidence_status)
             state.warnings.extend(response.warnings)

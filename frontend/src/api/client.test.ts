@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest';
 
-import { setStoredApiKey, uploadPaper } from './client';
+import { deleteKnowledgePaper, setStoredApiKey, uploadPaper } from './client';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -47,4 +47,32 @@ test('uploads asynchronously with an idempotency key and polls to ready', async 
   expect(firstHeaders.get('Authorization')).toBe('Bearer secret');
   expect(firstHeaders.get('Idempotency-Key')).toBeTruthy();
   expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/paper-uploads/upload-1');
+});
+
+test('deletes a knowledge paper through the durable API', async () => {
+  setStoredApiKey('secret');
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        doc_id: 'doc-1',
+        deleted_chunk_count: 3,
+        deleted_revision_count: 1,
+        deleted_upload_count: 1,
+        deleted_file_count: 1,
+        detached_note_count: 0,
+        warnings: [],
+        warning_codes: [],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ),
+  );
+  vi.stubGlobal('fetch', fetchMock);
+
+  const result = await deleteKnowledgePaper('doc-1');
+
+  expect(result.deleted_chunk_count).toBe(3);
+  expect(fetchMock).toHaveBeenCalledWith(
+    '/api/v1/knowledge/papers/doc-1',
+    expect.objectContaining({ method: 'DELETE' }),
+  );
 });

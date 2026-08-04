@@ -15,10 +15,12 @@ from backend.core.sanitize import safe_exception_message
 from backend.evals.evaluate_rag import citation_metrics
 from backend.main import app
 from backend.models.schemas import PaperChunk, ReadingQAResponse
-from backend.rag.embedder import XfyunSparkEmbeddingProvider
-from backend.repositories.sqlite_store import SQLiteStore
+from backend.rag.embedder import EmbeddingResult, MockEmbeddingProvider, XfyunSparkEmbeddingProvider
+from backend.repositories.sqlite_store import SQLiteStore, get_sqlite_store
 from backend.scripts.harden_legacy_data import harden_legacy_data
 from backend.services.chunker import CHUNKER_VERSION, DocumentBlock, StructuredChunker
+from backend.services import paper_ingestion
+from backend.services.paper_ingestion import PaperIngestionService
 from backend.services.pdf_parser import PdfParser, PdfValidationError
 from backend.services.vector_index import VectorIndexManager
 
@@ -275,6 +277,37 @@ def test_scanned_page_fails_retryably_when_ocr_is_unavailable(monkeypatch) -> No
     assert error.value.retryable is True
 
 
+def test_auto_ocr_skips_unavailable_low_text_page_when_other_text_exists(monkeypatch) -> None:
+    import fitz
+
+    document = fitz.open()
+    document.new_page()
+    text_page = document.new_page()
+    text_page.insert_textbox(
+        fitz.Rect(40, 80, 550, 700),
+        "Extractable research evidence. " * 20,
+        fontsize=11,
+    )
+    content = document.tobytes()
+    document.close()
+    parser = PdfParser(ocr_mode="auto")
+
+    def unavailable(_page):
+        raise PdfValidationError("OCR missing", "OCR_REQUIRED", retryable=True)
+
+    monkeypatch.setattr(parser, "_ocr_page", unavailable)
+    chunks = parser.parse(
+        content,
+        "mixed.pdf",
+        doc_id="mixed",
+        revision_id="r1",
+    )
+
+    assert chunks
+    assert parser.warning_codes == ["OCR_SKIPPED"]
+    assert "Extractable research evidence" in " ".join(chunk.text for chunk in chunks)
+
+
 def test_repeated_headers_are_removed_without_dropping_body_blocks() -> None:
     import fitz
 
@@ -444,6 +477,166 @@ def test_interrupted_upload_is_retryable_and_orphans_are_reconciled(tmp_path) ->
     manager.store(create_if_missing=True).add_chunks([orphan], [[0.1] * 16])
     assert manager.reconcile_orphan_vectors() == 1
     assert manager.store(create_if_missing=False).ids() == set()
+
+
+def test_failed_revision_is_reclaimed_after_replacement_succeeds(tmp_path, monkeypatch) -> None:
+    settings = Settings(
+        sqlite_url=str(tmp_path / "app.db"),
+        chroma_dir=str(tmp_path / "chroma"),
+        document_dir=str(tmp_path / "documents"),
+        default_embedding_provider="mock",
+        default_embedding_model="mock-embedding",
+    )
+    store = SQLiteStore(settings.sqlite_path)
+    provider = MockEmbeddingProvider()
+
+    class RetryableFailureProvider:
+        profile = provider.profile
+
+        async def embed(self, _texts):
+            return EmbeddingResult(
+                vectors=[],
+                warnings=["temporary embedding failure"],
+                profile=self.profile,
+                is_fallback=True,
+            )
+
+    def create(upload_id: str, revision_id: str, source_name: str) -> Path:
+        source = settings.documents_path / "doc" / source_name
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(_pdf_bytes(f"{revision_id} grounded evidence " * 20))
+        store.create_upload(
+            upload_id=upload_id,
+            idempotency_key=f"key-{upload_id}",
+            doc_id="doc",
+            revision_id=revision_id,
+            title="paper.pdf",
+            content_sha256=f"hash-{revision_id}",
+            source_path=str(source),
+            mime_type="application/pdf",
+            size_bytes=source.stat().st_size,
+        )
+        return source
+
+    failed_source = create("upload-failed", "revision-failed", "failed.pdf")
+    monkeypatch.setattr(
+        paper_ingestion,
+        "configured_embedding_provider",
+        lambda _settings, document=True: RetryableFailureProvider(),
+    )
+    asyncio.run(PaperIngestionService(settings).process("upload-failed"))
+
+    failed = store.get_upload("upload-failed")
+    assert failed is not None
+    assert failed["status"] == "failed"
+    assert bool(failed["retryable"]) is True
+    assert store.revision_chunk_ids("revision-failed")
+    assert failed_source.exists()
+
+    replacement_source = create("upload-ready", "revision-ready", "ready.pdf")
+    monkeypatch.setattr(
+        paper_ingestion,
+        "configured_embedding_provider",
+        lambda _settings, document=True: provider,
+    )
+    asyncio.run(PaperIngestionService(settings).process("upload-ready"))
+
+    ready = store.get_upload("upload-ready")
+    assert ready is not None
+    assert ready["status"] == "ready"
+    assert store.revision_chunk_ids("revision-ready")
+    assert store.revision_chunk_ids("revision-failed") == []
+    assert not failed_source.exists()
+    assert replacement_source.exists()
+
+
+def test_retrying_original_failed_upload_keeps_source_and_reaches_ready(tmp_path, monkeypatch) -> None:
+    settings = Settings(
+        sqlite_url=str(tmp_path / "app.db"),
+        chroma_dir=str(tmp_path / "chroma"),
+        document_dir=str(tmp_path / "documents"),
+        default_embedding_provider="mock",
+        default_embedding_model="mock-embedding",
+    )
+    store = SQLiteStore(settings.sqlite_path)
+    source = settings.documents_path / "doc" / "retry.pdf"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(_pdf_bytes("retryable grounded evidence " * 20))
+    store.create_upload(
+        upload_id="upload-retry",
+        idempotency_key="key-retry",
+        doc_id="doc",
+        revision_id="revision-retry",
+        title="paper.pdf",
+        content_sha256="hash-retry",
+        source_path=str(source),
+        mime_type="application/pdf",
+        size_bytes=source.stat().st_size,
+    )
+    provider = MockEmbeddingProvider()
+
+    class RetryableFailureProvider:
+        profile = provider.profile
+
+        async def embed(self, _texts):
+            return EmbeddingResult([], ["temporary embedding failure"], self.profile, True)
+
+    monkeypatch.setattr(
+        paper_ingestion,
+        "configured_embedding_provider",
+        lambda _settings, document=True: RetryableFailureProvider(),
+    )
+    asyncio.run(PaperIngestionService(settings).process("upload-retry"))
+    staged_chunk_ids = store.revision_chunk_ids("revision-retry")
+    assert staged_chunk_ids
+    assert source.exists()
+
+    store.reset_upload_for_retry("upload-retry")
+    monkeypatch.setattr(
+        paper_ingestion,
+        "configured_embedding_provider",
+        lambda _settings, document=True: provider,
+    )
+    asyncio.run(PaperIngestionService(settings).process("upload-retry"))
+
+    retried = store.get_upload("upload-retry")
+    assert retried is not None
+    assert retried["status"] == "ready"
+    assert store.revision_chunk_ids("revision-retry") == staged_chunk_ids
+    assert source.exists()
+
+
+def test_non_retryable_upload_failure_immediately_removes_managed_source(tmp_path) -> None:
+    settings = Settings(
+        sqlite_url=str(tmp_path / "app.db"),
+        chroma_dir=str(tmp_path / "chroma"),
+        document_dir=str(tmp_path / "documents"),
+        default_embedding_provider="mock",
+        default_embedding_model="mock-embedding",
+    )
+    store = SQLiteStore(settings.sqlite_path)
+    source = settings.documents_path / "doc" / "damaged.pdf"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"%PDF-not-a-valid-document")
+    store.create_upload(
+        upload_id="upload-damaged",
+        idempotency_key="key-damaged",
+        doc_id="doc",
+        revision_id="revision-damaged",
+        title="damaged.pdf",
+        content_sha256="hash-damaged",
+        source_path=str(source),
+        mime_type="application/pdf",
+        size_bytes=source.stat().st_size,
+    )
+
+    asyncio.run(PaperIngestionService(settings).process("upload-damaged"))
+
+    failed = store.get_upload("upload-damaged")
+    assert failed is not None
+    assert failed["status"] == "failed"
+    assert bool(failed["retryable"]) is False
+    assert not source.exists()
 
 
 def test_revision_switch_is_atomic_and_keeps_old_revision_visible(tmp_path) -> None:

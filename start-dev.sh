@@ -88,6 +88,12 @@ echo "Starting backend on 127.0.0.1:$BACKEND_PORT..."
 "$PYTHON_BIN" -m uvicorn backend.main:app --host 127.0.0.1 --port "$BACKEND_PORT" >"$BACKEND_OUT" 2>"$BACKEND_ERR" &
 backend_pid=$!
 
+if ! wait_url "http://127.0.0.1:$BACKEND_PORT/health/live"; then
+  echo "Backend did not become healthy in time."
+  echo "Backend log:  $BACKEND_ERR"
+  exit 1
+fi
+
 echo "Starting frontend on 127.0.0.1:$FRONTEND_PORT..."
 npm run dev --prefix "$FRONTEND_DIR" -- --host 127.0.0.1 --port "$FRONTEND_PORT" >"$FRONTEND_OUT" 2>"$FRONTEND_ERR" &
 frontend_pid=$!
@@ -115,7 +121,7 @@ url="http://localhost:$FRONTEND_PORT/"
 echo "Ready: $url"
 echo "Backend PID:  $backend_pid"
 echo "Frontend PID: $frontend_pid"
-echo "Local API Key (enter in the browser): $api_key"
+echo "Local API authentication is configured automatically."
 
 case "$(uname -s)" in
   Darwin) open "$url" >/dev/null 2>&1 || true ;;

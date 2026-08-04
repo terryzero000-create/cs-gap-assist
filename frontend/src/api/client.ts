@@ -8,6 +8,7 @@ import type {
   NoteCreateRequest,
   NoteRecord,
   PaperCollectionUpdateRequest,
+  PaperDeleteResponse,
   PaperListResponse,
   PaperRecord,
   PaperUploadResponse,
@@ -247,6 +248,14 @@ export async function updateKnowledgePaper(docId: string, request: PaperCollecti
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
+    }),
+  );
+}
+
+export async function deleteKnowledgePaper(docId: string): Promise<PaperDeleteResponse> {
+  return parseResponse<PaperDeleteResponse>(
+    await apiFetch(`${API_PREFIX}/knowledge/papers/${encodeURIComponent(docId)}`, {
+      method: 'DELETE',
     }),
   );
 }

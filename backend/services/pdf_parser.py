@@ -4,7 +4,9 @@ import io
 import re
 from collections import Counter
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from backend.services.chunker import DocumentBlock, StructuredChunker
 
@@ -36,6 +38,36 @@ class PdfValidation:
     needs_ocr: bool
 
 
+@dataclass(frozen=True)
+class OcrCapability:
+    """Cached availability of the optional OCR runtime and language data."""
+
+    available: bool
+    detail: str
+
+
+@lru_cache(maxsize=1)
+def ocr_capability() -> OcrCapability:
+    """Detect the optional Tesseract runtime once per process."""
+    try:
+        import pytesseract  # type: ignore[import-not-found]
+        from PIL import Image  # noqa: F401
+    except ImportError:
+        return OcrCapability(False, "pytesseract or Pillow is not installed")
+    try:
+        pytesseract.get_tesseract_version()
+        languages = set(pytesseract.get_languages(config=""))
+    except Exception:
+        return OcrCapability(False, "Tesseract executable is unavailable")
+    missing = sorted({"chi_sim", "eng"} - languages)
+    if missing:
+        return OcrCapability(
+            False,
+            f"Tesseract language data is missing: {', '.join(missing)}",
+        )
+    return OcrCapability(True, "Tesseract with chi_sim and eng is available")
+
+
 class PdfValidationError(ValueError):
     """Raised when bytes are not a safe, processable PDF."""
 
@@ -53,11 +85,17 @@ class PdfParser:
         *,
         max_pages: int = 500,
         max_payload_bytes: int = 6000,
-        enable_ocr: bool = True,
+        ocr_mode: Literal["disabled", "auto", "required"] = "auto",
+        enable_ocr: bool | None = None,
     ) -> None:
         self.max_pages = max_pages
         self.chunker = StructuredChunker(max_payload_bytes=max_payload_bytes)
-        self.enable_ocr = enable_ocr
+        if enable_ocr is not None:
+            ocr_mode = "required" if enable_ocr else "disabled"
+        self.ocr_mode = ocr_mode
+        self.enable_ocr = ocr_mode != "disabled"
+        self.warning_codes: list[str] = []
+        self.warnings: list[str] = []
 
     def validate(self, content: bytes) -> PdfValidation:
         """Verify PDF signature, encryption, page count, and text availability."""
@@ -103,6 +141,8 @@ class PdfParser:
         allow_text_fallback: bool = False,
     ) -> list[ParsedChunk]:
         """Extract layout blocks and return deterministic Chunker V2 chunks."""
+        self.warning_codes = []
+        self.warnings = []
         if not content.startswith(b"%PDF-") and allow_text_fallback:
             decoded = content.decode("utf-8", errors="ignore").strip()
             blocks = [DocumentBlock(page=1, text=decoded, section_path=title)] if decoded else []
@@ -213,8 +253,13 @@ class PdfParser:
                 if extracted_characters < 40:
                     try:
                         page_blocks.extend(self._ocr_page(page))
-                    except PdfValidationError:
-                        raise
+                    except PdfValidationError as exc:
+                        if self.ocr_mode == "required":
+                            raise
+                        self._add_warning(
+                            "OCR_SKIPPED",
+                            f"Skipped a low-text page because OCR is unavailable: {exc}",
+                        )
                 raw_pages.append(page_blocks)
 
             repeated_edges = {
@@ -246,6 +291,13 @@ class PdfParser:
     def _ocr_page(self, page: object) -> list[tuple[float, float, float, float, str, str]]:
         if not self.enable_ocr:
             return []
+        capability = ocr_capability()
+        if not capability.available:
+            raise PdfValidationError(
+                f"OCR is required but unavailable: {capability.detail}",
+                "OCR_REQUIRED",
+                retryable=True,
+            )
         try:
             import fitz  # type: ignore[import-not-found]
             import pytesseract  # type: ignore[import-not-found]
@@ -264,6 +316,13 @@ class PdfParser:
                 "OCR_REQUIRED",
                 retryable=True,
             ) from exc
+
+    def _add_warning(self, code: str, warning: str) -> None:
+        """Record one parser warning without duplicating it for every page."""
+        if code in self.warning_codes:
+            return
+        self.warning_codes.append(code)
+        self.warnings.append(warning)
 
     @staticmethod
     def _reading_order(

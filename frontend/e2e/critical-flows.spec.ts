@@ -18,8 +18,6 @@ async function unlock(page: import('@playwright/test').Page, papers = [paper]) {
     body: JSON.stringify({ papers }),
   }));
   await page.goto('/');
-  await page.getByLabel('API Key').fill('test-token');
-  await page.getByRole('button', { name: '进入工作台' }).click();
   await expect(page.getByText('Grounded RAG Paper')).toBeVisible();
 }
 

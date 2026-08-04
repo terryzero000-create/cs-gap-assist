@@ -24,6 +24,8 @@ export interface EvidenceRef {
   doc_id?: string | null;
   chunk_id?: string | null;
   page?: number | null;
+  is_available?: boolean;
+  unavailable_reason?: 'source_deleted' | null;
 }
 
 export interface PaperUploadResponse {
@@ -66,6 +68,19 @@ export interface PaperRecord {
 
 export interface PaperListResponse {
   papers: PaperRecord[];
+}
+
+export interface PaperDeleteResponse {
+  doc_id: string;
+  deleted_chunk_count: number;
+  deleted_revision_count: number;
+  deleted_upload_count: number;
+  deleted_file_count: number;
+  detached_note_count: number;
+  unavailable_gap_ref_count: number;
+  unavailable_experiment_ref_count: number;
+  warnings: string[];
+  warning_codes: string[];
 }
 
 export interface PaperCollectionUpdateRequest {

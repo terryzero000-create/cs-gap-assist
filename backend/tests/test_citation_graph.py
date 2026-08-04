@@ -1,5 +1,6 @@
 import asyncio
 
+import httpx
 from fastapi.testclient import TestClient
 
 from backend.main import app
@@ -99,6 +100,41 @@ def test_openalex_client_requires_api_key() -> None:
 
     assert papers == []
     assert warnings == ["OPENALEX_API_KEY missing; OpenAlex evidence is unavailable."]
+
+
+def test_openalex_citation_expansion_uses_current_page_parameter_and_limit() -> None:
+    seen_params: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_params.update(dict(request.url.params))
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "id": f"https://openalex.org/W{index}",
+                        "display_name": f"Citation {index}",
+                        "publication_year": 2026,
+                        "cited_by_count": index,
+                    }
+                    for index in range(1, 5)
+                ]
+            },
+        )
+
+    async def fetch() -> list[ExternalCitationPaper]:
+        openalex = OpenAlexCitationClient(
+            api_key="test-key",
+            transport=httpx.MockTransport(handler),
+        )
+        async with httpx.AsyncClient(transport=openalex.transport) as client:
+            return await openalex._fetch_citations(client, "W0", limit=2)
+
+    citations = asyncio.run(fetch())
+
+    assert seen_params["per_page"] == "2"
+    assert "per-page" not in seen_params
+    assert len(citations) == 2
 
 
 def test_real_openalex_nodes_without_relationships_do_not_get_fake_links() -> None:

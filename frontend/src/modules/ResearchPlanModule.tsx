@@ -81,7 +81,7 @@ export function ResearchPlanModule(props: ResearchPlanModuleProps) {
         {props.result?.warnings.length ? (
           <ul className="warning-list">
             {props.result.warnings.map((warning, index) => (
-              <li key={`${props.result?.warning_codes[index]}:${warning}`}>
+              <li key={`${props.result?.warning_codes[index]}:${warning}:${index}`}>
                 <strong>{props.result?.warning_codes[index] ?? 'UNCLASSIFIED_WARNING'}</strong> · {warning}
               </li>
             ))}
@@ -143,7 +143,11 @@ export function ResearchPlanModule(props: ResearchPlanModuleProps) {
                 <ul>
                   {card.recommended_refs.map((paper) => (
                     <li key={paper.id}>
-                      <a href={paper.canonical_url} rel="noreferrer" target="_blank">{paper.title}</a>
+                      {paper.is_available === false ? (
+                        <span className="evidence-unavailable">来源已删除 · {paper.title}</span>
+                      ) : (
+                        <a href={paper.canonical_url} rel="noreferrer" target="_blank">{paper.title}</a>
+                      )}
                       <small>{paper.source} · {paper.id}</small>
                     </li>
                   ))}

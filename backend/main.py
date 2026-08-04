@@ -9,7 +9,8 @@ from backend.core.config import get_settings
 from backend.core.errors import register_error_handlers
 from backend.core.security import ApiKeyMiddleware
 from backend.rag.embedder import close_embedding_http_clients
-from backend.repositories.sqlite_store import SQLiteStore
+from backend.repositories.sqlite_store import get_sqlite_store
+from backend.services.pdf_parser import ocr_capability
 from backend.services.paper_ingestion import get_ingestion_worker
 from backend.services.vector_index import get_vector_index_manager
 
@@ -19,7 +20,9 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Run the durable local ingestion worker for the application lifetime."""
-    worker = get_ingestion_worker(get_settings())
+    runtime_settings = get_settings()
+    get_sqlite_store(runtime_settings.sqlite_path)
+    worker = get_ingestion_worker(runtime_settings)
     await worker.ensure_started()
     try:
         yield
@@ -72,12 +75,10 @@ async def readiness_check() -> JSONResponse:
     components: dict[str, dict[str, object]] = {}
     ready = True
     try:
-        store = SQLiteStore(get_settings().sqlite_path)
-        store.count_chunks()
+        store = get_sqlite_store(get_settings().sqlite_path)
+        store.ping()
         components["sqlite"] = {"status": "ready"}
-        reupload_required = sum(
-            paper.reupload_required for paper in store.list_papers()
-        )
+        reupload_required = store.count_reupload_required()
         migration_ready = reupload_required == 0
         ready = ready and migration_ready
         components["data_migration"] = {
@@ -117,6 +118,25 @@ async def readiness_check() -> JSONResponse:
         embedding_ready = True
     ready = ready and embedding_ready
     components["embedding_config"] = {"status": "ready" if embedding_ready else "failed"}
+    ocr_mode = get_settings().ocr_mode
+    if ocr_mode == "disabled":
+        components["ocr"] = {
+            "status": "disabled",
+            "mode": ocr_mode,
+            "detail": "OCR is disabled by configuration",
+        }
+    else:
+        ocr = ocr_capability()
+        ocr_required = ocr_mode == "required"
+        ocr_ready = ocr.available or not ocr_required
+        ready = ready and ocr_ready
+        components["ocr"] = {
+            "status": "ready" if ocr.available else (
+                "failed" if ocr_required else "unavailable"
+            ),
+            "mode": ocr_mode,
+            "detail": ocr.detail,
+        }
     auth_ready = (
         get_settings().app_env == "test"
         or bool(get_settings().app_api_key)

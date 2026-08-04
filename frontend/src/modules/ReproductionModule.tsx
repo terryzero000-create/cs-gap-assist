@@ -161,5 +161,22 @@ function ReportView({ result }: { result: ReproductionAgentResponse }) {
 }
 
 function ReportList({ title, items }: { title: string; items: string[] }) {
-  return <section><h3>{title}</h3><ul>{items.map((item) => <li key={item}>{item}</li>)}</ul></section>;
+  const visibleItems = items.length > 0 ? items : ['unknown'];
+  return (
+    <section>
+      <h3>{title}</h3>
+      <ul>{visibleItems.map((item) => <li key={item}>{formatReproductionField(item)}</li>)}</ul>
+    </section>
+  );
+}
+
+export function formatReproductionField(item: string): string {
+  const normalized = item.trim();
+  if (normalized.toLowerCase() === 'unknown') {
+    return '论文上下文未提供';
+  }
+  if (normalized.toLowerCase().startsWith('unknown:')) {
+    return `论文上下文未提供：${normalized.slice('unknown:'.length).trim()}`;
+  }
+  return item;
 }

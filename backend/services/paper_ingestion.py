@@ -9,7 +9,7 @@ from backend.core.config import Settings
 from backend.core.errors import ApiError
 from backend.core.sanitize import safe_exception_message
 from backend.models.schemas import PaperChunk, PaperUploadTaskResponse
-from backend.repositories.sqlite_store import SQLiteStore
+from backend.repositories.sqlite_store import get_sqlite_store
 from backend.services.chunker import CHUNKER_VERSION
 from backend.services.pdf_parser import PdfParser, PdfValidationError
 from backend.services.vector_index import VectorIndexManager, configured_embedding_provider
@@ -29,7 +29,7 @@ class PaperIngestionService:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.store = SQLiteStore(settings.sqlite_path)
+        self.store = get_sqlite_store(settings.sqlite_path)
 
     async def process(self, upload_id: str) -> None:
         """Advance one upload to ready or a truthful failed state."""
@@ -50,6 +50,7 @@ class PaperIngestionService:
             parser = PdfParser(
                 max_pages=self.settings.max_pdf_pages,
                 max_payload_bytes=self.settings.xfyun_max_text_bytes,
+                ocr_mode=self.settings.ocr_mode,
             )
             validation = parser.validate(content)
             self._record_stage("validating", stage_started)
@@ -87,8 +88,8 @@ class PaperIngestionService:
                 )
                 for item in parsed
             ]
-            warning_codes: list[str] = []
-            warnings: list[str] = []
+            warning_codes: list[str] = list(parser.warning_codes)
+            warnings: list[str] = list(parser.warnings)
             if any(chunk.injection_flagged for chunk in chunks):
                 warning_codes.append("SOURCE_PROMPT_INJECTION_FLAGGED")
                 warnings.append(
@@ -153,16 +154,12 @@ class PaperIngestionService:
             self._record_stage("indexed", stage_started)
             previous_revision = self.store.activate_upload(upload_id)
             if previous_revision and previous_revision != upload["revision_id"]:
-                try:
-                    previous_ids = self.store.revision_chunk_ids(previous_revision)
-                    manager.store(create_if_missing=False).delete_chunks(previous_ids)
-                    self.store.delete_revision_chunks(previous_revision)
-                except Exception:
-                    self.store.record_metric(
-                        "ingestion.reconciliation_pending",
-                        1,
-                        "count",
-                    )
+                self._cleanup_revision_chunks(manager, previous_revision)
+            self._cleanup_failed_revisions(
+                manager,
+                doc_id=str(upload["doc_id"]),
+                active_revision_id=str(upload["revision_id"]),
+            )
         except PdfValidationError as exc:
             self._fail(upload_id, str(exc), exc.error_code, exc.retryable)
         except IngestionFailure as exc:
@@ -207,18 +204,81 @@ class PaperIngestionService:
         if record is None:
             return
         chunk_ids = self.store.revision_chunk_ids(str(record["revision_id"]))
-        if not chunk_ids:
+        vectors_removed = True
+        if chunk_ids:
+            try:
+                manager = VectorIndexManager(self.settings)
+                manager.store(create_if_missing=False).delete_chunks(chunk_ids)
+                self.store.delete_vector_entries(chunk_ids, manager.profile.key)
+            except Exception:
+                vectors_removed = False
+                self._record_reconciliation_pending()
+        if retryable or not vectors_removed:
             return
         try:
-            manager = VectorIndexManager(self.settings)
-            manager.store(create_if_missing=False).delete_chunks(chunk_ids)
-            self.store.delete_vector_entries(chunk_ids, manager.profile.key)
+            if chunk_ids:
+                self.store.delete_revision_chunks(str(record["revision_id"]))
+            self._delete_managed_source_file(str(record["source_path"]))
         except Exception:
-            self.store.record_metric(
-                "ingestion.reconciliation_pending",
-                1,
-                "count",
-            )
+            self._record_reconciliation_pending()
+
+    def _cleanup_revision_chunks(
+        self,
+        manager: VectorIndexManager,
+        revision_id: str,
+    ) -> bool:
+        """Remove vectors and chunks only after a revision is no longer active."""
+        chunk_ids = self.store.revision_chunk_ids(revision_id)
+        try:
+            if chunk_ids:
+                manager.store(create_if_missing=False).delete_chunks(chunk_ids)
+                self.store.delete_vector_entries(chunk_ids, manager.profile.key)
+            self.store.delete_revision_chunks(revision_id)
+            return True
+        except Exception:
+            self._record_reconciliation_pending()
+            return False
+
+    def _cleanup_failed_revisions(
+        self,
+        manager: VectorIndexManager,
+        *,
+        doc_id: str,
+        active_revision_id: str,
+    ) -> None:
+        """Reclaim failed revisions once another revision is safely active."""
+        manifests = self.store.failed_revision_cleanup_manifests(
+            doc_id,
+            exclude_revision_id=active_revision_id,
+        )
+        for manifest in manifests:
+            revision_id = str(manifest["revision_id"])
+            if self._cleanup_revision_chunks(manager, revision_id):
+                self._delete_managed_source_file(str(manifest["source_path"]))
+
+    def _delete_managed_source_file(self, source_path: str) -> None:
+        """Delete an inactive source only when it is below the managed document root."""
+        root = self.settings.documents_path.resolve()
+        candidate = Path(source_path).resolve()
+        if not candidate.is_relative_to(root):
+            self._record_reconciliation_pending()
+            return
+        try:
+            candidate.unlink(missing_ok=True)
+            if candidate.parent != root:
+                try:
+                    candidate.parent.rmdir()
+                except OSError:
+                    pass
+        except OSError:
+            self._record_reconciliation_pending()
+
+    def _record_reconciliation_pending(self) -> None:
+        self.store.record_metric(
+            "ingestion.reconciliation_pending",
+            1,
+            "count",
+        )
 
 
 @dataclass
@@ -247,7 +307,7 @@ class IngestionWorker:
         self._queue = asyncio.Queue()
         self._loop_id = loop_id
         self._queued.clear()
-        SQLiteStore(self.settings.sqlite_path).recover_interrupted_uploads()
+        get_sqlite_store(self.settings.sqlite_path).recover_interrupted_uploads()
         try:
             VectorIndexManager(self.settings).reconcile_orphan_vectors()
         except Exception:

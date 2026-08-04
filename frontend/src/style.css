@@ -583,6 +583,11 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.evidence-unavailable {
+  color: #b42318;
+  font-weight: 700;
+}
+
 .plan-card {
   display: grid;
   gap: 14px;
@@ -1508,6 +1513,33 @@ a:focus-visible {
   color: var(--ink);
 }
 
+.danger-button {
+  background: #fff7f3;
+  border-color: #e3b9aa;
+  box-shadow: none;
+  color: #9a3f2c;
+  min-height: 36px;
+}
+
+.danger-button:hover:not(:disabled) {
+  background: #f9e5dd;
+  border-color: #cf8f7a;
+  box-shadow: none;
+  color: #7c2d1f;
+}
+
+.danger-button-solid {
+  background: #a34832;
+  border-color: #a34832;
+  color: #fffaf5;
+}
+
+.danger-button-solid:hover:not(:disabled) {
+  background: #873724;
+  border-color: #873724;
+  color: #fff;
+}
+
 .link-button,
 .link-button:hover:not(:disabled) {
   background: transparent;
@@ -2128,9 +2160,78 @@ textarea {
   gap: 13px;
 }
 
+.record-card.is-delete-confirming {
+  border-color: #d9aa99;
+  box-shadow: 0 0 0 4px rgba(163, 72, 50, 0.08);
+}
+
 .record-card h3 {
   color: var(--ink);
   font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+}
+
+.delete-confirmation {
+  align-items: center;
+  background: #fff2ec;
+  border: 1px solid #e8c2b4;
+  border-radius: 12px;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  padding: 13px 14px;
+}
+
+.delete-confirmation strong {
+  color: #7c2d1f;
+  font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+}
+
+.delete-confirmation p {
+  line-height: 1.55;
+  margin: 4px 0 0;
+}
+
+.delete-confirmation-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.paper-library-empty {
+  align-items: center;
+  background:
+    linear-gradient(135deg, rgba(54, 119, 95, 0.06), transparent 60%),
+    #faf7f0;
+  border: 1px dashed #cfc6b7;
+  border-radius: 15px;
+  display: flex;
+  gap: 14px;
+  padding: 24px;
+}
+
+.paper-library-empty > span {
+  align-items: center;
+  background: #e4efe9;
+  border: 1px solid #cdded4;
+  border-radius: 13px 13px 13px 4px;
+  color: var(--forest);
+  display: flex;
+  flex: 0 0 auto;
+  font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+
+.paper-library-empty strong {
+  color: var(--ink);
+  font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+}
+
+.paper-library-empty p {
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 5px 0 0;
 }
 
 .result-columns {

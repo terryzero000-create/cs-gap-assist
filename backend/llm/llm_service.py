@@ -104,7 +104,7 @@ class OpenAICompatibleChatProvider(ChatProvider):
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         payload: dict[str, Any] = {"model": selected_model, "messages": [{"role": "user", "content": prompt}]}
         try:
-            async with httpx.AsyncClient(timeout=30.0, transport=self.transport) as client:
+            async with httpx.AsyncClient(timeout=300.0, transport=self.transport) as client:
                 response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
                 response.raise_for_status()
             data = response.json()

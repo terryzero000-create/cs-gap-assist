@@ -60,6 +60,7 @@ def _warning_code(warning: str) -> str:
         ("prompt injection", "SOURCE_PROMPT_INJECTION_FLAGGED"),
         ("instruction-like", "SOURCE_PROMPT_INJECTION_FLAGGED"),
         ("provider unavailable", "MODEL_PROVIDER_UNAVAILABLE"),
+        ("experiment suggestion failed", "EXPERIMENT_SUGGESTION_FAILED"),
         ("synthetic", "SYNTHETIC_MODE"),
         ("mock", "SYNTHETIC_MODE"),
     )
@@ -85,6 +86,8 @@ class EvidenceRef(BaseModel):
     doc_id: str | None = Field(default=None, max_length=128)
     chunk_id: str | None = Field(default=None, max_length=128)
     page: int | None = None
+    is_available: bool = True
+    unavailable_reason: Literal["source_deleted"] | None = None
 
 
 class ModelOption(BaseModel):
@@ -201,6 +204,19 @@ class PaperListResponse(BaseModel):
     """Stored paper listing response."""
 
     papers: list[PaperRecord]
+
+
+class PaperDeleteResponse(WarningMixin):
+    """Summary of durable resources removed with one paper."""
+
+    doc_id: str
+    deleted_chunk_count: int = 0
+    deleted_revision_count: int = 0
+    deleted_upload_count: int = 0
+    deleted_file_count: int = 0
+    detached_note_count: int = 0
+    unavailable_gap_ref_count: int = 0
+    unavailable_experiment_ref_count: int = 0
 
 
 class PaperUploadTaskResponse(WarningMixin):

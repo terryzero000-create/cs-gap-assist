@@ -8,7 +8,7 @@ from backend.core.errors import ApiError
 from backend.models.schemas import PaperChunk
 from backend.rag.embedder import EmbeddingProfile, EmbeddingProvider, get_embedding_provider
 from backend.rag.vector_store import ChromaVectorStore, chunk_content_hash, clear_vector_store_cache, get_vector_store
-from backend.repositories.sqlite_store import SQLiteStore
+from backend.repositories.sqlite_store import get_sqlite_store
 
 
 LEGACY_COLLECTION = "paper_chunks"
@@ -66,7 +66,7 @@ class VectorIndexManager:
     settings: Settings
 
     def __post_init__(self) -> None:
-        self.sqlite = SQLiteStore(self.settings.sqlite_path)
+        self.sqlite = get_sqlite_store(self.settings.sqlite_path)
         self.profile = provider_profile(configured_embedding_provider(self.settings))
 
     def collection_name(self) -> str:
@@ -116,7 +116,7 @@ class VectorIndexManager:
 
     def reconcile_orphan_vectors(self) -> int:
         """Remove v4 vectors that are not part of any active SQLite revision."""
-        source_ids = {chunk.chunk_id for chunk in self.sqlite.list_chunks()}
+        source_ids = self.sqlite.active_chunk_ids()
         store = self.store(create_if_missing=False)
         orphan_ids = sorted(store.ids() - source_ids)
         if orphan_ids:
@@ -126,8 +126,7 @@ class VectorIndexManager:
         return len(orphan_ids)
 
     def status(self) -> dict[str, object]:
-        chunks = self.sqlite.list_chunks()
-        source_ids = {chunk.chunk_id for chunk in chunks}
+        source_ids = self.sqlite.active_chunk_ids()
         store = self.store(create_if_missing=False)
         indexed_ids = store.ids()
         state_record = self.sqlite.get_vector_index_state(self.profile.key)
@@ -139,7 +138,7 @@ class VectorIndexManager:
             state = "migrating"
         elif counts.get("failed", 0):
             state = "degraded"
-        elif not chunks and not indexed_ids:
+        elif not source_ids and not indexed_ids:
             state = "empty"
         elif store.collection_name == LEGACY_COLLECTION:
             state = "legacy"

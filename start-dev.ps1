@@ -124,6 +124,12 @@ $backend = Start-Process `
     -RedirectStandardError $BackendErr `
     -PassThru
 
+if (-not (Wait-Url -Url "http://127.0.0.1:$BackendPort/health/live" -Seconds 90)) {
+    Write-Host "Backend did not become healthy in time."
+    Write-Host "Backend log:  $BackendErr"
+    exit 1
+}
+
 Write-Host "Starting frontend on 127.0.0.1:$FrontendPort..."
 $frontend = Start-Process `
     -FilePath "npm.cmd" `
@@ -154,7 +160,7 @@ $url = "http://localhost:$FrontendPort/"
 Write-Host "Ready: $url"
 Write-Host "Backend PID:  $($backend.Id)"
 Write-Host "Frontend PID: $($frontend.Id)"
-Write-Host "Local API Key (enter in the browser): $localApiKey"
+Write-Host "Local API authentication is configured automatically."
 Write-Host "Logs:"
 Write-Host "  $BackendErr"
 Write-Host "  $BackendOut"

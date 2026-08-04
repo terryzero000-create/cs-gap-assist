@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from backend.core.config import Settings
 from backend.core.sanitize import safe_exception_message
 from backend.models.schemas import EvidenceRef, PaperChunk
-from backend.repositories.sqlite_store import SQLiteStore
+from backend.repositories.sqlite_store import SQLiteStore, get_sqlite_store
 from backend.services.vector_index import (
     VectorIndexManager,
     configured_embedding_provider,
@@ -141,7 +141,7 @@ class EvidenceRetriever:
 
     def __init__(self, settings: Settings, store: SQLiteStore | None = None) -> None:
         self.settings = settings
-        self.store = store or SQLiteStore(settings.sqlite_path)
+        self.store = store or get_sqlite_store(settings.sqlite_path)
 
     async def retrieve(
         self,

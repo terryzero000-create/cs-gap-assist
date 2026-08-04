@@ -3,9 +3,12 @@ import math
 import os
 import re
 import sqlite3
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
+from typing import Iterator
 
 from backend.models.schemas import (
     EvidenceRef,
@@ -16,6 +19,24 @@ from backend.models.schemas import (
     PaperChunk,
     PaperRecord,
 )
+
+
+_PAPER_OPERATION_LOCKS: dict[str, threading.RLock] = {}
+_PAPER_OPERATION_LOCKS_GUARD = threading.Lock()
+
+
+@contextmanager
+def paper_operation_lock(doc_id: str) -> Iterator[None]:
+    """Serialize one paper's replacement and deletion operations in this process.
+
+    This is intentionally an in-process lock for the single-process contest
+    deployment. Multi-worker or distributed deployments need a database
+    deletion state or a distributed lock instead.
+    """
+    with _PAPER_OPERATION_LOCKS_GUARD:
+        lock = _PAPER_OPERATION_LOCKS.setdefault(doc_id, threading.RLock())
+    with lock:
+        yield
 
 
 class _ClosingSQLiteConnection(sqlite3.Connection):
@@ -655,7 +676,19 @@ class SQLiteStore:
         filter_params: list[object] = []
         if tag:
             conditions.append(
-                "EXISTS (SELECT 1 FROM json_each(p.tags) WHERE json_each.value = ?)"
+                """
+                EXISTS (
+                    SELECT 1
+                    FROM json_each(
+                        CASE
+                            WHEN json_valid(p.tags) = 1
+                             AND json_type(p.tags) = 'array' THEN p.tags
+                            ELSE '[]'
+                        END
+                    )
+                    WHERE json_each.value = ?
+                )
+                """
             )
             filter_params.append(tag)
         if favorites_only:
@@ -705,6 +738,33 @@ class SQLiteStore:
         return [self._chunk_from_row(row) for row in rows]
 
     def create_upload(
+        self,
+        *,
+        upload_id: str,
+        idempotency_key: str,
+        doc_id: str,
+        revision_id: str,
+        title: str,
+        content_sha256: str,
+        source_path: str,
+        mime_type: str,
+        size_bytes: int,
+    ) -> dict[str, object]:
+        """Create an upload while serializing it with deletion for this paper."""
+        with paper_operation_lock(doc_id):
+            return self._create_upload_unlocked(
+                upload_id=upload_id,
+                idempotency_key=idempotency_key,
+                doc_id=doc_id,
+                revision_id=revision_id,
+                title=title,
+                content_sha256=content_sha256,
+                source_path=source_path,
+                mime_type=mime_type,
+                size_bytes=size_bytes,
+            )
+
+    def _create_upload_unlocked(
         self,
         *,
         upload_id: str,
@@ -1356,6 +1416,20 @@ class SQLiteStore:
 
     @staticmethod
     def _experiment_signature(experiment: ExperimentPlan) -> tuple[object, ...]:
+        canonical_refs = tuple(
+            sorted(
+                (
+                    str(ref.source),
+                    ref.id,
+                    ref.doc_id,
+                    ref.chunk_id,
+                    ref.page,
+                    ref.is_available,
+                    ref.unavailable_reason,
+                )
+                for ref in experiment.support_refs
+            )
+        )
         return (
             experiment.gap_id,
             experiment.objective,
@@ -1364,7 +1438,7 @@ class SQLiteStore:
             tuple(experiment.baselines),
             tuple(experiment.steps),
             tuple(experiment.risks),
-            tuple(ref.model_dump_json() for ref in experiment.support_refs),
+            canonical_refs,
             experiment.trust_status,
         )
 
@@ -1462,11 +1536,22 @@ class SQLiteStore:
             title=row["title"],
             created_at=row["created_at"],
             is_favorite=bool(row["is_favorite"]),
-            tags=json.loads(row["tags"]),
+            tags=self._safe_tags(row["tags"]),
             active_revision_id=row["active_revision_id"],
             ingestion_status=row["ingestion_status"],
             reupload_required=bool(row["reupload_required"]),
         )
+
+    @staticmethod
+    def _safe_tags(value: object) -> list[str]:
+        """Read legacy tags without allowing one damaged row to break an API."""
+        try:
+            parsed = json.loads(value) if isinstance(value, str) else value
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [item for item in parsed if isinstance(item, str)]
 
     @staticmethod
     def _fts_query(query: str) -> str:

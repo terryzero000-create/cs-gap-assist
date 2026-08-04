@@ -6,7 +6,7 @@ from fastapi import APIRouter, File, Form, Header, UploadFile, status
 from backend.core.config import get_settings
 from backend.core.errors import ApiError
 from backend.models.schemas import PaperUploadTaskResponse
-from backend.repositories.sqlite_store import get_sqlite_store
+from backend.repositories.sqlite_store import get_sqlite_store, paper_operation_lock
 from backend.services.paper_ingestion import (
     get_ingestion_worker,
     persist_upload_file,
@@ -55,20 +55,33 @@ async def create_paper_upload(
         destination=source_path,
         max_bytes=settings.max_pdf_bytes,
     )
+    created: dict[str, object] | None = None
     try:
-        created = store.create_upload(
-            upload_id=upload_id,
-            idempotency_key=idempotency_key,
-            doc_id=doc_id,
-            revision_id=revision_id,
-            title=file.filename,
-            content_sha256=digest,
-            source_path=str(source_path),
-            mime_type=file.content_type or "application/pdf",
-            size_bytes=size,
-        )
+        # Re-check after waiting: deletion may have won the per-document lock
+        # while this replacement file was being streamed to disk.
+        with paper_operation_lock(doc_id):
+            if replace_doc_id:
+                current_paper = store.get_paper(doc_id)
+                if current_paper is None or current_paper.ingestion_status not in {"ready", "reupload_required"}:
+                    raise ApiError(
+                        f"Paper not found: {replace_doc_id}",
+                        404,
+                        error_code="PAPER_NOT_FOUND",
+                    )
+            created = store.create_upload(
+                upload_id=upload_id,
+                idempotency_key=idempotency_key,
+                doc_id=doc_id,
+                revision_id=revision_id,
+                title=file.filename,
+                content_sha256=digest,
+                source_path=str(source_path),
+                mime_type=file.content_type or "application/pdf",
+                size_bytes=size,
+            )
     except ValueError as exc:
-        source_path.unlink(missing_ok=True)
+        if created is None:
+            source_path.unlink(missing_ok=True)
         if str(exc) == "IDEMPOTENCY_KEY_REUSED":
             raise ApiError(
                 "Idempotency-Key was already used with different file content.",
@@ -76,6 +89,11 @@ async def create_paper_upload(
                 error_code="IDEMPOTENCY_KEY_REUSED",
             ) from exc
         raise
+    except Exception:
+        if created is None:
+            source_path.unlink(missing_ok=True)
+        raise
+    assert created is not None
     if str(created["upload_id"]) != upload_id:
         source_path.unlink(missing_ok=True)
     await get_ingestion_worker(settings).enqueue(str(created["upload_id"]))

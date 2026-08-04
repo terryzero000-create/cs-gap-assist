@@ -1,10 +1,17 @@
+import json
+import sqlite3
+import threading
+
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.core.config import get_settings
+from backend.core.errors import ApiError
 from backend.main import app
 from backend.models.schemas import EvidenceRef, ExperimentPlan, GapItem, NoteCreateRequest, PaperChunk
-from backend.repositories.sqlite_store import SQLiteStore, get_sqlite_store
+from backend.repositories.sqlite_store import SQLiteStore, get_sqlite_store, paper_operation_lock
+from backend.services import paper_deletion
+from backend.services.paper_deletion import delete_paper_data
 from backend.services.vector_index import VectorIndexManager
 
 
@@ -272,3 +279,253 @@ def test_knowledge_search_chunks_are_bounded_without_full_corpus_load(monkeypatc
 
     assert response.status_code == 200
     assert len(response.json()["chunks"]) == 7
+
+
+def test_knowledge_search_tolerates_legacy_and_malformed_tags(tmp_path) -> None:
+    database = tmp_path / "legacy-tags.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            CREATE TABLE papers (
+                doc_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                is_favorite INTEGER NOT NULL DEFAULT 0,
+                tags TEXT,
+                active_revision_id TEXT,
+                ingestion_status TEXT NOT NULL DEFAULT 'ready',
+                reupload_required INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT
+            )
+            """
+        )
+    store = SQLiteStore(database)
+    tag_values = [None, "", "not-json", "[]", json.dumps(["legacy-tag"])]
+    for index, tags in enumerate(tag_values):
+        doc_id = f"legacy-tags-{index}"
+        store.add_paper(
+            doc_id,
+            f"Legacy tags {index}",
+            [
+                PaperChunk(
+                    chunk_id=f"legacy-tags-chunk-{index}",
+                    doc_id=doc_id,
+                    page=1,
+                    text="legacy tag search needle",
+                )
+            ],
+        )
+        with sqlite3.connect(database) as connection:
+            connection.execute("UPDATE papers SET tags = ? WHERE doc_id = ?", (tags, doc_id))
+
+    papers = {paper.doc_id: paper for paper in store.list_papers()}
+    assert [papers[f"legacy-tags-{index}"].tags for index in range(5)] == [[], [], [], [], ["legacy-tag"]]
+
+    fts_results = store.search_knowledge_chunks("needle", tag="legacy-tag")
+    assert [chunk.doc_id for chunk in fts_results] == ["legacy-tags-4"]
+    like_results = store.search_knowledge_chunks("nee", tag="legacy-tag")
+    assert [chunk.doc_id for chunk in like_results] == ["legacy-tags-4"]
+    assert {
+        chunk.doc_id for chunk in store.search_knowledge_chunks("needle")
+    } == {f"legacy-tags-{index}" for index in range(5)}
+
+
+def test_delete_failure_keeps_sqlite_chunks_and_vectors(monkeypatch) -> None:
+    settings = get_settings()
+    store = get_sqlite_store(settings.sqlite_path)
+    chunk = PaperChunk(
+        chunk_id="failed-delete-chunk",
+        doc_id="failed-delete-doc",
+        page=1,
+        text="vector must remain after failed deletion",
+    )
+    store.add_paper(chunk.doc_id, "failed-delete.pdf", [chunk])
+    vector_manager = VectorIndexManager(settings)
+    vector_manager.add_chunks([chunk], [[0.5] * vector_manager.profile.dimension])
+
+    class FailingManager:
+        def __init__(self, _settings) -> None:
+            pass
+
+        def collection_name(self) -> str:
+            return "failing-delete-collection"
+
+    class FailingVectorStore:
+        def delete_chunks(self, _chunk_ids) -> None:
+            raise RuntimeError("injected vector delete failure")
+
+    monkeypatch.setattr(paper_deletion, "VectorIndexManager", FailingManager)
+    monkeypatch.setattr(paper_deletion, "get_vector_store", lambda *_args, **_kwargs: FailingVectorStore())
+
+    with pytest.raises(ApiError) as error:
+        delete_paper_data(settings, store, chunk.doc_id)
+
+    assert error.value.error_code == "PAPER_VECTOR_DELETE_FAILED"
+    assert [item.chunk_id for item in store.list_chunks([chunk.doc_id])] == [chunk.chunk_id]
+    assert chunk.chunk_id in vector_manager.store(create_if_missing=False).ids()
+
+
+def test_delete_and_replacement_upload_are_serialized_and_replacement_rechecks_state(monkeypatch) -> None:
+    settings = get_settings()
+    store = get_sqlite_store(settings.sqlite_path)
+    doc_id = "serialized-delete-doc"
+    store.add_paper(
+        doc_id,
+        "serialized.pdf",
+        [PaperChunk(chunk_id="serialized-chunk", doc_id=doc_id, page=1, text="serialized evidence")],
+    )
+    delete_started = threading.Event()
+    allow_delete = threading.Event()
+    replacement_staged = threading.Event()
+    replacement_result: dict[str, object] = {}
+
+    class BlockingManager:
+        def __init__(self, _settings) -> None:
+            pass
+
+        def collection_name(self) -> str:
+            return "blocking-delete-collection"
+
+    class BlockingVectorStore:
+        def delete_chunks(self, _chunk_ids) -> None:
+            delete_started.set()
+            assert allow_delete.wait(3)
+
+    monkeypatch.setattr(paper_deletion, "VectorIndexManager", BlockingManager)
+    monkeypatch.setattr(
+        paper_deletion,
+        "get_vector_store",
+        lambda *_args, **_kwargs: BlockingVectorStore(),
+    )
+
+    from backend.api import paper_upload
+
+    original_persist = paper_upload.persist_upload_file
+
+    async def tracked_persist(*args, **kwargs):
+        result = await original_persist(*args, **kwargs)
+        replacement_staged.set()
+        return result
+
+    class NoopWorker:
+        async def enqueue(self, _upload_id: str) -> None:
+            return None
+
+    monkeypatch.setattr(paper_upload, "persist_upload_file", tracked_persist)
+    monkeypatch.setattr(paper_upload, "get_ingestion_worker", lambda _settings: NoopWorker())
+
+    def run_delete() -> None:
+        try:
+            replacement_result["delete"] = delete_paper_data(settings, store, doc_id)
+        except Exception as exc:  # pragma: no cover - assertion below reports unexpected errors
+            replacement_result["delete_error"] = exc
+
+    def run_replacement() -> None:
+        from fastapi.testclient import TestClient
+
+        with TestClient(app) as client:
+            replacement_result["upload"] = client.post(
+                "/api/v1/paper-uploads",
+                data={"replace_doc_id": doc_id},
+                headers={"Idempotency-Key": "serialized-replacement-key"},
+                files={"file": ("replacement.pdf", b"replacement", "application/pdf")},
+            )
+
+    delete_thread = threading.Thread(target=run_delete)
+    delete_thread.start()
+    assert delete_started.wait(3)
+    replacement_thread = threading.Thread(target=run_replacement)
+    replacement_thread.start()
+    assert replacement_staged.wait(3)
+    allow_delete.set()
+    delete_thread.join(3)
+    replacement_thread.join(3)
+
+    assert "delete_error" not in replacement_result
+    assert replacement_result["upload"].status_code == 404
+    assert store.get_paper(doc_id) is None
+    assert not list((settings.documents_path / doc_id).glob("*.pdf"))
+
+
+def test_paper_operation_locks_are_isolated_by_doc_id() -> None:
+    acquired = threading.Event()
+
+    def acquire_other_document() -> None:
+        with paper_operation_lock("independent-doc-b"):
+            acquired.set()
+
+    with paper_operation_lock("independent-doc-a"):
+        thread = threading.Thread(target=acquire_other_document)
+        thread.start()
+        assert acquired.wait(1)
+        thread.join(1)
+
+
+def test_experiment_deduplication_canonicalizes_support_ref_order() -> None:
+    store = get_sqlite_store(get_settings().sqlite_path)
+    chunks = [
+        PaperChunk(chunk_id="signature-chunk-a", doc_id="signature-doc", page=1, text="a"),
+        PaperChunk(chunk_id="signature-chunk-b", doc_id="signature-doc", page=2, text="b"),
+        PaperChunk(chunk_id="signature-chunk-c", doc_id="signature-doc", page=3, text="c"),
+    ]
+    store.add_paper("signature-doc", "signature.pdf", chunks)
+
+    def ref(chunk: PaperChunk) -> EvidenceRef:
+        return EvidenceRef(
+            source="local",
+            id=f"local:{chunk.doc_id}:{chunk.chunk_id}",
+            title="signature.pdf",
+            canonical_url=f"/api/v1/knowledge/papers/{chunk.doc_id}#chunk-{chunk.chunk_id}",
+            doc_id=chunk.doc_id,
+            chunk_id=chunk.chunk_id,
+            page=chunk.page,
+        )
+
+    first, second, third = (ref(chunk) for chunk in chunks)
+    first_experiment = store.save_experiment(
+        ExperimentPlan(
+            gap_id="signature-gap",
+            objective="Compare canonical references",
+            datasets=["dataset"],
+            metrics=["metric"],
+            baselines=["baseline"],
+            steps=["run"],
+            risks=["risk"],
+            support_papers=[first.id, second.id],
+            support_refs=[first, second],
+            trust_status="local_only",
+        )
+    )
+    reused = store.save_experiment(
+        ExperimentPlan(
+            gap_id="signature-gap",
+            objective="Compare canonical references",
+            datasets=["dataset"],
+            metrics=["metric"],
+            baselines=["baseline"],
+            steps=["run"],
+            risks=["risk"],
+            support_papers=[second.id, first.id],
+            support_refs=[second, first],
+            trust_status="local_only",
+        )
+    )
+    different = store.save_experiment(
+        ExperimentPlan(
+            gap_id="signature-gap",
+            objective="Compare canonical references",
+            datasets=["dataset"],
+            metrics=["metric"],
+            baselines=["baseline"],
+            steps=["run"],
+            risks=["risk"],
+            support_papers=[first.id, third.id],
+            support_refs=[first, third],
+            trust_status="local_only",
+        )
+    )
+
+    assert reused.experiment_id == first_experiment.experiment_id
+    assert [item.id for item in reused.support_refs] == [first.id, second.id]
+    assert different.experiment_id != first_experiment.experiment_id
+    assert len(store.list_experiments(gap_id="signature-gap")) == 2

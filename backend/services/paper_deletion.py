@@ -4,7 +4,7 @@ from backend.core.config import Settings
 from backend.core.errors import ApiError
 from backend.models.schemas import PaperDeleteResponse
 from backend.rag.vector_store import clear_vector_store_cache, get_vector_store
-from backend.repositories.sqlite_store import SQLiteStore
+from backend.repositories.sqlite_store import SQLiteStore, paper_operation_lock
 from backend.services.vector_index import LEGACY_COLLECTION, VectorIndexManager
 
 
@@ -14,62 +14,63 @@ def delete_paper_data(
     doc_id: str,
 ) -> PaperDeleteResponse:
     """Delete one paper from vectors, SQLite, and managed document storage."""
-    try:
-        manifest = store.paper_deletion_manifest(doc_id)
-    except ValueError as exc:
-        raise _paper_busy_error(exc) from exc
-    if manifest is None:
-        raise ApiError(
-            "Paper not found.",
-            404,
-            error_code="PAPER_NOT_FOUND",
-        )
-
-    chunk_ids = list(manifest["chunk_ids"])
-    if chunk_ids:
+    with paper_operation_lock(doc_id):
         try:
-            manager = VectorIndexManager(settings)
-            collection_names = {
-                LEGACY_COLLECTION,
-                manager.collection_name(),
-                *manifest["vector_collections"],
-            }
-            for collection_name in collection_names:
-                get_vector_store(
-                    settings,
-                    collection_name=str(collection_name),
-                    create_if_missing=False,
-                ).delete_chunks(chunk_ids)
-            clear_vector_store_cache()
-        except Exception as exc:
+            manifest = store.paper_deletion_manifest(doc_id)
+        except ValueError as exc:
+            raise _paper_busy_error(exc) from exc
+        if manifest is None:
             raise ApiError(
-                "Unable to remove the paper from the vector index.",
-                503,
-                error_code="PAPER_VECTOR_DELETE_FAILED",
-                retryable=True,
+                "Paper not found.",
+                404,
+                error_code="PAPER_NOT_FOUND",
+            )
+
+        chunk_ids = list(manifest["chunk_ids"])
+        if chunk_ids:
+            try:
+                manager = VectorIndexManager(settings)
+                collection_names = {
+                    LEGACY_COLLECTION,
+                    manager.collection_name(),
+                    *manifest["vector_collections"],
+                }
+                for collection_name in collection_names:
+                    get_vector_store(
+                        settings,
+                        collection_name=str(collection_name),
+                        create_if_missing=False,
+                    ).delete_chunks(chunk_ids)
+                clear_vector_store_cache()
+            except Exception as exc:
+                raise ApiError(
+                    "Unable to remove the paper from the vector index.",
+                    503,
+                    error_code="PAPER_VECTOR_DELETE_FAILED",
+                    retryable=True,
+                ) from exc
+
+        try:
+            deleted = store.delete_paper_records(doc_id)
+        except KeyError as exc:
+            raise ApiError(
+                "Paper not found.",
+                404,
+                error_code="PAPER_NOT_FOUND",
             ) from exc
+        except ValueError as exc:
+            raise _paper_busy_error(exc) from exc
 
-    try:
-        deleted = store.delete_paper_records(doc_id)
-    except KeyError as exc:
-        raise ApiError(
-            "Paper not found.",
-            404,
-            error_code="PAPER_NOT_FOUND",
-        ) from exc
-    except ValueError as exc:
-        raise _paper_busy_error(exc) from exc
-
-    deleted_files, warnings = _delete_managed_source_files(
-        settings.documents_path,
-        list(manifest["source_paths"]),
-    )
-    return PaperDeleteResponse(
-        doc_id=doc_id,
-        deleted_file_count=deleted_files,
-        warnings=warnings,
-        **deleted,
-    )
+        deleted_files, warnings = _delete_managed_source_files(
+            settings.documents_path,
+            list(manifest["source_paths"]),
+        )
+        return PaperDeleteResponse(
+            doc_id=doc_id,
+            deleted_file_count=deleted_files,
+            warnings=warnings,
+            **deleted,
+        )
 
 
 def _delete_managed_source_files(

@@ -19,7 +19,13 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.3.0"]
 rag = ["chromadb>=0.5.0", "PyMuPDF>=1.24.0"]
-xfyun = ["requests", "numpy"]
+xfyun = ["numpy>=1.26.0"]
+pdf-advanced = [
+  "Pillow>=10.0.0",
+  "pytesseract>=0.3.13",
+  "pymupdf-layout>=1.26.0"
+]
+rerank = ["sentence-transformers>=3.0.0"]
 
 [tool.setuptools.packages.find]
 include = ["backend*"]
@@ -27,3 +33,6 @@ include = ["backend*"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["backend/tests"]
+markers = [
+  "live: manually triggered tests that call configured external providers"
+]

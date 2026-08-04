@@ -8,7 +8,7 @@ from backend.core.errors import ApiError
 from backend.models.schemas import PaperChunk
 from backend.rag.embedder import EmbeddingProfile, EmbeddingProvider, get_embedding_provider
 from backend.rag.vector_store import ChromaVectorStore, chunk_content_hash, clear_vector_store_cache, get_vector_store
-from backend.repositories.sqlite_store import SQLiteStore
+from backend.repositories.sqlite_store import get_sqlite_store
 
 
 LEGACY_COLLECTION = "paper_chunks"
@@ -43,7 +43,17 @@ def lexical_chunk_search(chunks: list[PaperChunk], query: str, top_k: int) -> li
 
 def _tokens(text: str) -> set[str]:
     normalized = text.casefold()
-    latin = set(re.findall(r"[a-z0-9_]{2,}", normalized))
+    words = re.findall(r"[a-z0-9_]{2,}", normalized)
+    latin = set(words)
+    for word in words:
+        for suffix in ("ing", "ed", "es", "s"):
+            if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+                latin.add(word[: -len(suffix)])
+                break
+    latin.update(
+        "".join(word[0] for word in words[index : index + 3])
+        for index in range(max(len(words) - 2, 0))
+    )
     cjk = "".join(re.findall(r"[\u3400-\u9fff]", normalized))
     bigrams = {cjk[index : index + 2] for index in range(max(len(cjk) - 1, 0))}
     return latin | bigrams
@@ -56,28 +66,32 @@ class VectorIndexManager:
     settings: Settings
 
     def __post_init__(self) -> None:
-        self.sqlite = SQLiteStore(self.settings.sqlite_path)
+        self.sqlite = get_sqlite_store(self.settings.sqlite_path)
         self.profile = provider_profile(configured_embedding_provider(self.settings))
 
     def collection_name(self) -> str:
         state = self.sqlite.get_vector_index_state(self.profile.key)
         if state and state.get("active_collection"):
             return str(state["active_collection"])
-        legacy = get_vector_store(self.settings, collection_name=LEGACY_COLLECTION, create_if_missing=False)
-        if legacy.count() and legacy.dimension() == self.profile.dimension:
-            return LEGACY_COLLECTION
         return self.profile.collection_name
 
     def store(self, create_if_missing: bool = False) -> ChromaVectorStore:
         name = self.collection_name()
-        profile = self.profile if name != LEGACY_COLLECTION else None
         return get_vector_store(
-            self.settings, profile=profile, collection_name=name, create_if_missing=create_if_missing
+            self.settings,
+            profile=self.profile,
+            collection_name=name,
+            create_if_missing=create_if_missing,
         )
 
     def add_chunks(self, chunks: list[PaperChunk], vectors: list[list[float]]) -> None:
         if self.sqlite.vector_index_lock():
-            raise ApiError("Vector index migration is in progress; paper uploads are temporarily disabled.", 503)
+            raise ApiError(
+                "Vector index migration is in progress; paper uploads are temporarily disabled.",
+                503,
+                error_code="INDEX_MIGRATION_IN_PROGRESS",
+                retryable=True,
+            )
         store = self.store(create_if_missing=True)
         hashes = {chunk.chunk_id: chunk_content_hash(chunk) for chunk in chunks}
         self.sqlite.mark_vector_entries(chunks, self.profile.key, store.collection_name, hashes, "pending")
@@ -86,7 +100,12 @@ class VectorIndexManager:
         except Exception as exc:
             self.sqlite.mark_vector_entries(chunks, self.profile.key, store.collection_name, hashes, "failed", str(exc))
             self.sqlite.set_vector_index_state(self.profile.key, "degraded", store.collection_name)
-            raise ApiError(f"Vector indexing failed: {exc}", 503) from exc
+            raise ApiError(
+                f"Vector indexing failed: {exc}",
+                503,
+                error_code="INDEX_WRITE_FAILED",
+                retryable=True,
+            ) from exc
         self.sqlite.mark_vector_entries(chunks, self.profile.key, store.collection_name, hashes, "ready")
         state = "legacy" if store.collection_name == LEGACY_COLLECTION else "ready"
         self.sqlite.set_vector_index_state(self.profile.key, state, store.collection_name)
@@ -95,9 +114,19 @@ class VectorIndexManager:
     def search(self, query_vector: list[float], doc_ids: list[str], top_k: int) -> list[PaperChunk]:
         return self.store().search(query_vector, doc_ids=doc_ids, top_k=top_k)
 
+    def reconcile_orphan_vectors(self) -> int:
+        """Remove v4 vectors that are not part of any active SQLite revision."""
+        source_ids = self.sqlite.active_chunk_ids()
+        store = self.store(create_if_missing=False)
+        orphan_ids = sorted(store.ids() - source_ids)
+        if orphan_ids:
+            store.delete_chunks(orphan_ids)
+            self.sqlite.delete_vector_entries(orphan_ids, self.profile.key)
+            clear_vector_store_cache()
+        return len(orphan_ids)
+
     def status(self) -> dict[str, object]:
-        chunks = self.sqlite.list_chunks()
-        source_ids = {chunk.chunk_id for chunk in chunks}
+        source_ids = self.sqlite.active_chunk_ids()
         store = self.store(create_if_missing=False)
         indexed_ids = store.ids()
         state_record = self.sqlite.get_vector_index_state(self.profile.key)
@@ -109,7 +138,7 @@ class VectorIndexManager:
             state = "migrating"
         elif counts.get("failed", 0):
             state = "degraded"
-        elif not chunks and not indexed_ids:
+        elif not source_ids and not indexed_ids:
             state = "empty"
         elif store.collection_name == LEGACY_COLLECTION:
             state = "legacy"
@@ -126,6 +155,7 @@ class VectorIndexManager:
                 "model": self.profile.model,
                 "dimension": self.profile.dimension,
                 "schema_version": self.profile.schema_version,
+                "chunker_schema": self.profile.chunker_schema,
                 "key": self.profile.key,
             },
             "active_collection": store.collection_name,

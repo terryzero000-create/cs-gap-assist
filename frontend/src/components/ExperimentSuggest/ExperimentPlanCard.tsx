@@ -55,9 +55,17 @@ export function ExperimentPlanCard({ plan }: ExperimentPlanCardProps) {
         </ol>
       </section>
       <footer className="support-papers">
-        {plan.support_papers.map((paper) => (
-          <span key={paper}>{paper}</span>
-        ))}
+        {plan.support_refs.length > 0
+          ? plan.support_refs.map((reference) => (
+            <span key={reference.id}>
+              {reference.is_available === false ? (
+                <span className="evidence-unavailable">来源已删除 · {reference.title}</span>
+              ) : reference.canonical_url.startsWith('http') ? (
+                <a href={reference.canonical_url} rel="noreferrer" target="_blank">{reference.title}</a>
+              ) : reference.title}
+            </span>
+          ))
+          : plan.support_papers.map((paper) => <span key={paper}>{paper}</span>)}
       </footer>
     </article>
   );

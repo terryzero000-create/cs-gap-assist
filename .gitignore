@@ -5,6 +5,8 @@ __pycache__/
 data/
 node_modules/
 dist/
+test-results/
+playwright-report/
 .env
 *.egg-info/
 *.log

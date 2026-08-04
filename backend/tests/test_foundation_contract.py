@@ -1,12 +1,13 @@
 import asyncio
 from inspect import iscoroutinefunction
 
+import pytest
 from fastapi.routing import APIRoute
 
-from backend.llm.llm_service import DeepSeekChatProvider
+from backend.llm.llm_service import ChatProviderUnavailable, DeepSeekChatProvider
 from backend.core.config import Settings
 from backend.main import app
-from backend.models.schemas import ExperimentPlan, GapItem, NoteCreateRequest, PaperChunk
+from backend.models.schemas import EvidenceRef, ExperimentPlan, GapItem, NoteCreateRequest, PaperChunk
 from backend.rag.vector_store import ChromaVectorStore, InMemoryVectorStore
 from backend.repositories.sqlite_store import SQLiteStore
 
@@ -25,7 +26,26 @@ def test_sqlite_store_covers_foundation_metadata_crud(tmp_path) -> None:
     chunk = PaperChunk(chunk_id="chunk-1", doc_id="doc-1", page=1, text="retrieval augmented generation")
 
     paper = store.add_paper("doc-1", "RAG Paper", [chunk], tags=["rag"], is_favorite=True)
-    gap = store.save_gap(GapItem(gap_id="gap-1", title="Missing robustness", value_level="high", description="Need broader tests.", evidence_papers=["doc-1"]))
+    evidence = EvidenceRef(
+        source="local",
+        id="local:doc-1:chunk-1",
+        title="RAG Paper",
+        canonical_url="/api/v1/knowledge/papers/doc-1#chunk-chunk-1",
+        doc_id="doc-1",
+        chunk_id="chunk-1",
+        page=1,
+    )
+    gap = store.save_gap(
+        GapItem(
+            gap_id="gap-1",
+            title="Missing robustness",
+            value_level="high",
+            description="Need broader tests.",
+            evidence_papers=[evidence.id],
+            evidence_refs=[evidence],
+            trust_status="local_only",
+        )
+    )
     experiment = store.save_experiment(
         ExperimentPlan(
             experiment_id="exp-1",
@@ -36,7 +56,9 @@ def test_sqlite_store_covers_foundation_metadata_crud(tmp_path) -> None:
             baselines=["BM25"],
             steps=["Run benchmark"],
             risks=["Small sample"],
-            support_papers=["doc-1", "paper-2", "paper-3"],
+            support_papers=[evidence.id],
+            support_refs=[evidence],
+            trust_status="local_only",
         )
     )
     note = store.add_note(NoteCreateRequest(title="Robustness note", content="Use cross-domain tags.", tags=["rag"], related_doc_id=paper.doc_id))
@@ -77,11 +99,9 @@ def test_in_memory_vector_store_keeps_filter_semantics() -> None:
     assert store.all_chunks(doc_ids=["doc-b"], tags=["vision"], module_source="upload")[0].chunk_id == "b"
 
 
-def test_deepseek_provider_falls_back_without_api_key() -> None:
-    """Missing DEEPSEEK_API_KEY degrades to mock generation with an explicit warning."""
+def test_deepseek_provider_fails_closed_without_api_key() -> None:
+    """Missing DEEPSEEK_API_KEY must not create implicit mock output."""
     provider = DeepSeekChatProvider(Settings(deepseek_api_key=None))
 
-    text, warnings = asyncio.run(provider.generate("hello", "deepseek-v4-pro"))
-
-    assert text
-    assert any("DEEPSEEK_API_KEY missing" in warning for warning in warnings)
+    with pytest.raises(ChatProviderUnavailable, match="DEEPSEEK_API_KEY missing"):
+        asyncio.run(provider.generate("hello", "deepseek-v4-pro"))

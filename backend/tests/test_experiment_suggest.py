@@ -9,13 +9,59 @@ import httpx
 from backend.core.config import Settings, get_settings
 from backend.llm.chains import experiment_chain
 from backend.main import app
-from backend.models.schemas import ExperimentPlan, ExperimentSuggestRequest, GapItem
+from backend.models.schemas import EvidenceRef, ExperimentPlan, ExperimentSuggestRequest, GapItem
 from backend.repositories.sqlite_store import SQLiteStore
 from backend.services.arxiv_search import ArxivSearchClient
 from backend.services.external_paper import ExternalPaper
 
 
-def test_experiment_suggestion_contains_literature_supported_plan() -> None:
+class TrustedJsonProvider:
+    async def generate(self, prompt: str, model: str | None = None) -> tuple[str, list[str]]:
+        return json.dumps(
+            {
+                "experiments": [
+                    {
+                        "objective": "Evaluate retrieval robustness.",
+                        "datasets": ["Dataset A"],
+                        "metrics": ["F1"],
+                        "baselines": ["BM25"],
+                        "steps": ["Run evaluation"],
+                        "risks": ["Limited labels"],
+                    }
+                ]
+            }
+        ), []
+
+
+class TrustedArxivSearchClient:
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
+        return [
+            ExternalPaper(
+                paper_id=f"arxiv-2501.{index:05d}",
+                title=f"Trusted paper {index}",
+                abstract="Verified experiment evidence.",
+                year=2025,
+                canonical_url=f"https://arxiv.org/abs/2501.{index:05d}",
+            )
+            for index in range(1, limit + 1)
+        ], []
+
+
+def trusted_arxiv_ref() -> EvidenceRef:
+    return EvidenceRef(
+        source="arxiv",
+        id="arxiv-2501.00001",
+        title="Trusted paper",
+        canonical_url="https://arxiv.org/abs/2501.00001",
+    )
+
+
+def test_experiment_suggestion_contains_literature_supported_plan(monkeypatch) -> None:
+    monkeypatch.setattr(experiment_chain, "ArxivSearchClient", TrustedArxivSearchClient)
+    monkeypatch.setattr(experiment_chain, "get_chat_provider", lambda settings, provider=None: TrustedJsonProvider())
     client = TestClient(app)
 
     response = client.post(
@@ -34,10 +80,14 @@ def test_experiment_suggestion_contains_literature_supported_plan() -> None:
     assert plan["steps"]
     assert len(plan["support_papers"]) >= 3
     assert len(plan["support_papers"]) <= 5
+    assert body["evidence_status"] == "verified"
+    assert plan["support_refs"]
 
 
 def test_experiment_suggestion_is_persisted(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("SQLITE_URL", str(tmp_path / "experiments.db"))
+    monkeypatch.setattr(experiment_chain, "ArxivSearchClient", TrustedArxivSearchClient)
+    monkeypatch.setattr(experiment_chain, "get_chat_provider", lambda settings, provider=None: TrustedJsonProvider())
     get_settings.cache_clear()
     client = TestClient(app)
 
@@ -69,6 +119,7 @@ def test_experiment_suggestion_uses_stored_gap_when_topic_is_omitted(tmp_path, m
                     title=f"Support paper {index}",
                     abstract="Experiment evidence.",
                     year=2025,
+                    canonical_url=f"https://arxiv.org/abs/2502.{index:05d}",
                 )
                 for index in range(1, limit + 1)
             ]
@@ -78,13 +129,16 @@ def test_experiment_suggestion_uses_stored_gap_when_topic_is_omitted(tmp_path, m
     monkeypatch.setattr(experiment_chain, "ArxivSearchClient", CapturingArxivSearchClient)
     get_settings.cache_clear()
     store = SQLiteStore(get_settings().sqlite_path)
+    evidence = trusted_arxiv_ref()
     store.save_gap(
         GapItem(
             gap_id="gap-real",
             title="Longitudinal deployment evaluation is missing",
             value_level="high",
             description="Existing RAG studies rarely measure production drift over time.",
-            evidence_papers=["paper-a"],
+            evidence_papers=[evidence.id],
+            evidence_refs=[evidence],
+            trust_status="verified",
         )
     )
     client = TestClient(app)
@@ -102,13 +156,16 @@ def test_gap_history_endpoint_returns_stored_gaps(tmp_path, monkeypatch) -> None
     monkeypatch.setenv("SQLITE_URL", str(tmp_path / "experiments.db"))
     get_settings.cache_clear()
     store = SQLiteStore(get_settings().sqlite_path)
+    evidence = trusted_arxiv_ref()
     store.save_gap(
         GapItem(
             gap_id="gap-history",
             title="Benchmark coverage is narrow",
             value_level="mid",
             description="Existing evaluations do not cover enough deployment settings.",
-            evidence_papers=["paper-b"],
+            evidence_papers=[evidence.id],
+            evidence_refs=[evidence],
+            trust_status="verified",
         )
     )
     client = TestClient(app)
@@ -124,6 +181,7 @@ def test_experiment_history_endpoint_filters_by_gap_id(tmp_path, monkeypatch) ->
     monkeypatch.setenv("SQLITE_URL", str(tmp_path / "experiments.db"))
     get_settings.cache_clear()
     store = SQLiteStore(get_settings().sqlite_path)
+    evidence = trusted_arxiv_ref()
     expected = store.save_experiment(
         ExperimentPlan(
             gap_id="gap-history",
@@ -133,7 +191,9 @@ def test_experiment_history_endpoint_filters_by_gap_id(tmp_path, monkeypatch) ->
             baselines=["BM25"],
             steps=["Run baseline"],
             risks=["Small sample"],
-            support_papers=["paper-a", "paper-b", "paper-c"],
+            support_papers=[evidence.id],
+            support_refs=[evidence],
+            trust_status="verified",
         )
     )
     store.save_experiment(
@@ -145,7 +205,9 @@ def test_experiment_history_endpoint_filters_by_gap_id(tmp_path, monkeypatch) ->
             baselines=["RAG"],
             steps=["Run model"],
             risks=["Noisy labels"],
-            support_papers=["paper-d", "paper-e", "paper-f"],
+            support_papers=[evidence.id],
+            support_refs=[evidence],
+            trust_status="verified",
         )
     )
     client = TestClient(app)
@@ -222,10 +284,11 @@ def test_experiment_suggestion_repairs_fenced_json(monkeypatch, tmp_path) -> Non
         async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
             return [
                 ExternalPaper(
-                    paper_id=f"arxiv-{index}",
+                    paper_id=f"arxiv-2503.{index:05d}",
                     title=f"Support paper {index}",
                     abstract="Evidence for experiment design.",
                     year=2025,
+                    canonical_url=f"https://arxiv.org/abs/2503.{index:05d}",
                 )
                 for index in range(1, limit + 1)
             ], []
@@ -241,7 +304,13 @@ def test_experiment_suggestion_repairs_fenced_json(monkeypatch, tmp_path) -> Non
     )
 
     assert response.experiments[0].objective == "Evaluate drift-aware retrieval robustness."
-    assert response.experiments[0].support_papers == ["arxiv-1", "arxiv-2", "arxiv-3", "arxiv-4", "arxiv-5"]
+    assert response.experiments[0].support_papers == [
+        "arxiv-2503.00001",
+        "arxiv-2503.00002",
+        "arxiv-2503.00003",
+        "arxiv-2503.00004",
+        "arxiv-2503.00005",
+    ]
     assert "used test provider" in response.warnings
 
 
@@ -257,10 +326,11 @@ def test_experiment_suggestion_falls_back_for_invalid_model_output(monkeypatch, 
         async def search(self, query: str, limit: int = 5) -> tuple[list[ExternalPaper], list[str]]:
             return [
                 ExternalPaper(
-                    paper_id=f"arxiv-{index}",
+                    paper_id=f"arxiv-2504.{index:05d}",
                     title=f"Support paper {index}",
                     abstract="Evidence for experiment design.",
                     year=2025,
+                    canonical_url=f"https://arxiv.org/abs/2504.{index:05d}",
                 )
                 for index in range(1, limit + 1)
             ], []
@@ -275,7 +345,6 @@ def test_experiment_suggestion_falls_back_for_invalid_model_output(monkeypatch, 
         )
     )
 
-    assert response.experiments[0].gap_id == "gap-invalid"
-    assert response.experiments[0].datasets
-    assert len(response.experiments[0].support_papers) == 5
-    assert "Model did not return valid experiment JSON; using deterministic fallback experiment." in response.warnings
+    assert response.experiments == []
+    assert response.evidence_status == "insufficient_evidence"
+    assert "Model did not return valid experiment JSON; no experiment was created." in response.warnings

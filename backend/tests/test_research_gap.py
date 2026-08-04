@@ -37,7 +37,7 @@ def test_gap_analysis_returns_contract_shape() -> None:
     assert first["created_at"]
 
 
-def test_gap_history_returns_persisted_results() -> None:
+def test_synthetic_gap_analysis_is_not_persisted() -> None:
     client = TestClient(app)
     upload = client.post(
         "/api/v1/papers/upload",
@@ -54,7 +54,8 @@ def test_gap_history_returns_persisted_results() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert any(gap["gap_id"] == gap_id for gap in body["gaps"])
+    assert all(gap["gap_id"] != gap_id for gap in body["gaps"])
+    assert analyzed.json()["evidence_status"] == "synthetic"
 
 
 def test_backend_production_code_does_not_reference_deprecated_literature_provider() -> None:
@@ -106,13 +107,31 @@ def test_gap_analysis_repairs_fenced_json_and_normalizes_values(monkeypatch, tmp
                         "title": "Missing longitudinal evaluation",
                         "value_level": "HIGH",
                         "description": "Current work lacks long-running deployment evidence.",
-                        "evidence_papers": [],
+                        "evidence_papers": ["arxiv-2501.00001"],
                     }
                 ]
             }
             return f"Here is the analysis:\n```json\n{json.dumps(payload)}\n```", ["used test provider"]
 
+    class StubArxivSearchClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def search(self, query: str, limit: int = 5):
+            from backend.services.external_paper import ExternalPaper
+
+            return [
+                ExternalPaper(
+                    paper_id="arxiv-2501.00001",
+                    title="Trusted RAG evidence",
+                    abstract="Longitudinal evaluation evidence.",
+                    year=2025,
+                    canonical_url="https://arxiv.org/abs/2501.00001",
+                )
+            ], []
+
     monkeypatch.setattr(gap_chain, "get_chat_provider", lambda settings, provider=None: FencedJsonProvider())
+    monkeypatch.setattr(gap_chain, "ArxivSearchClient", StubArxivSearchClient)
 
     response = asyncio.run(
         gap_chain.analyze_research_gaps(
@@ -123,4 +142,5 @@ def test_gap_analysis_repairs_fenced_json_and_normalizes_values(monkeypatch, tmp
 
     assert response.gaps[0].value_level == "high"
     assert response.gaps[0].evidence_papers
+    assert response.evidence_status == "verified"
     assert "used test provider" in response.warnings
